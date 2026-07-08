@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Doctor"
+  short_description: "Agent skill and hook health clinic"
+  default_prompt: "Use $skill-doctor to scan my Codex and Claude customization folders and produce a treatment report."

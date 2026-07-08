@@ -9,19 +9,19 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/clinic",
     "templates",
     "fixtures",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-cli.mjs",
     "test": "vitest run src"
   },
   "dependencies": {
-    "@skill-doctor/core": "0.1.0",
-    "commander": "^12.1.0",
-    "zod": "^3.24.1"
+    "commander": "^12.1.0"
   },
   "devDependencies": {
     "vitest": "^2.1.8"

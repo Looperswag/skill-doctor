@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export function packageRoot(): string {
@@ -13,5 +13,6 @@ export function fixtureHome(name: string): string {
 }
 
 export function clinicStaticDir(): string {
-  return join(packageRoot(), "clinic");
+  const here = dirname(fileURLToPath(import.meta.url));
+  return basename(here) === "dist" ? join(here, "clinic") : join(here, "..", "dist", "clinic");
 }
