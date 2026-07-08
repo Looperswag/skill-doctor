@@ -62,9 +62,9 @@ describe("scan", () => {
 
     const markdown = renderMarkdownReport(report);
 
-    expect(markdown).toContain("# Skill Doctor Treatment Report");
+    expect(markdown).toContain("# Skill Doctor 治疗报告");
     expect(markdown).toContain("risky-skill");
     expect(markdown).toContain("POLLUTION_ENV_GLOBAL_INSTALL");
-    expect(markdown).toContain("Gate:");
+    expect(markdown).toContain("门禁：");
   });
 });

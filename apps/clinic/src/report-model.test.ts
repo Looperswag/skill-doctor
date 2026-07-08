@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { groupPatientsByWard, scoreTone } from "./report-model.js";
+import { groupPatientsByWard, scoreTone, summarizeFindingCount } from "./report-model.js";
 import type { SkillDoctorReport } from "./types.js";
 
 const report: SkillDoctorReport = {
@@ -52,7 +52,7 @@ describe("report-model", () => {
   test("groups patients into runner wards", () => {
     const wards = groupPatientsByWard(report);
 
-    expect(wards.map((ward) => ward.id)).toEqual(["codex", "claude"]);
+    expect(wards.map((ward) => ward.label)).toEqual(["Codex 病区", "Claude 病区"]);
     expect(wards[0]?.patients[0]?.name).toBe("demo-skill");
     expect(wards[1]?.averageScore).toBe(84);
   });
@@ -63,5 +63,9 @@ describe("report-model", () => {
     expect(scoreTone(72)).toBe("warning");
     expect(scoreTone(56)).toBe("risky");
     expect(scoreTone(12)).toBe("critical");
+  });
+
+  test("uses Simplified Chinese for empty finding summaries", () => {
+    expect(summarizeFindingCount(report.patients[0]!)).toBe("无发现项");
   });
 });

@@ -1,18 +1,18 @@
-# Runner Matrix
+# 运行器路径矩阵
 
 ## Codex
 
-- Skills: `$HOME/.agents/skills`, repo `.agents/skills`.
-- Hooks/config: `$HOME/.codex`, repo `.codex`.
-- Subagents: `$HOME/.codex/agents`, repo `.codex/agents`.
-- Treat `$HOME/.codex/skills` as legacy or compatibility input.
+- Skills：`$HOME/.agents/skills`，以及仓库内 `.agents/skills`。
+- Hooks/config：`$HOME/.codex`，以及仓库内 `.codex`。
+- Subagents：`$HOME/.codex/agents`，以及仓库内 `.codex/agents`。
+- `$HOME/.codex/skills` 视为遗留或兼容输入，不作为当前推荐主路径。
 
 ## Claude Code
 
-- Skills: `$HOME/.claude/skills`, repo `.claude/skills`.
-- Hooks/settings: `settings.json` files under `.claude` scopes.
-- Subagents: `$HOME/.claude/agents`, repo `.claude/agents`.
+- Skills：`$HOME/.claude/skills`，以及仓库内 `.claude/skills`。
+- Hooks/settings：各作用域 `.claude` 下的 `settings.json`。
+- Subagents：`$HOME/.claude/agents`，以及仓库内 `.claude/agents`。
 
-## Generic CLI
+## 通用 CLI
 
-Use explicit paths and report unknown compatibility instead of assuming runner behavior.
+使用显式路径，不要假设运行器行为；无法判断时报告为未知兼容性。

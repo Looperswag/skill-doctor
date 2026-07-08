@@ -60,10 +60,10 @@ function Clinic({
     <main className="clinic-shell">
       <header className="clinic-header">
         <div>
-          <p className="eyebrow">Skill Doctor Clinic</p>
-          <h1>Agent capability patients are under observation.</h1>
+          <p className="eyebrow">Skill Doctor 诊疗台</p>
+          <h1>Agent 能力病人正在接受观察。</h1>
         </div>
-        <div className={`score-terminal tone-${tone}`} aria-label={`Overall health score ${report.summary.score} of 100`}>
+        <div className={`score-terminal tone-${tone}`} aria-label={`整体健康分 ${report.summary.score} 分，满分 100 分`}>
           <Stethoscope aria-hidden="true" size={22} />
           <span>{report.summary.score}</span>
           <small>/100</small>
@@ -71,37 +71,37 @@ function Clinic({
       </header>
 
       <section className="summary-band" aria-label="Clinic summary">
-        <SummaryMeter label="Bloodline" value={report.summary.score} tone={tone} />
+        <SummaryMeter label="总血条" value={report.summary.score} tone={tone} />
         <div className="summary-stat">
-          <span>Gate</span>
-          <strong>{report.summary.gate}</strong>
+          <span>门禁</span>
+          <strong>{displayGate(report.summary.gate)}</strong>
         </div>
         <div className="summary-stat">
-          <span>Confidence</span>
+          <span>置信度</span>
           <strong>{Math.round(report.summary.confidence * 100)}%</strong>
         </div>
         <div className="summary-stat">
-          <span>Blockers</span>
+          <span>阻断项</span>
           <strong>{report.summary.blockers}</strong>
         </div>
       </section>
 
-      <section className="toolbar" aria-label="Report exports">
-        <ExportButton icon={<FileText size={16} />} label="Summary" onClick={() => downloadText("skill-doctor-summary.md", markdownSummary(report))} />
+      <section className="toolbar" aria-label="报告导出">
+        <ExportButton icon={<FileText size={16} />} label="摘要" onClick={() => downloadText("skill-doctor-summary.md", markdownSummary(report))} />
         <ExportButton icon={<FileJson size={16} />} label="JSON" onClick={() => downloadText("skill-doctor-report.json", JSON.stringify(report, null, 2))} />
-        <ExportButton icon={<Download size={16} />} label="Findings" onClick={() => downloadText("skill-doctor-findings.jsonl", report.findings.map((finding) => JSON.stringify(finding)).join("\n"))} />
+        <ExportButton icon={<Download size={16} />} label="发现项" onClick={() => downloadText("skill-doctor-findings.jsonl", report.findings.map((finding) => JSON.stringify(finding)).join("\n"))} />
         <ExportButton icon={<ImageDown size={16} />} label="PNG" onClick={() => downloadPng(report)} />
       </section>
 
       {wards.length === 0 ? (
         <section className="empty-state" role="status">
           <Activity aria-hidden="true" />
-          <h2>No patients discovered</h2>
-          <p>Run the clinic against a home directory or fixture that contains skills, hooks, subagents, or runner config.</p>
+          <h2>没有发现病人</h2>
+          <p>请对包含 skills、hooks、subagents 或运行器配置的 home 目录或 fixture 运行诊疗台。</p>
         </section>
       ) : (
-        <section className="clinic-grid">
-          <div className="wards" aria-label="Wards">
+        <section className="clinic-grid" aria-label="诊疗台主体">
+          <div className="wards" aria-label="病区">
             {wards.map((ward) => (
               <section className="ward" key={ward.id}>
                 <div className="ward-heading">
@@ -118,7 +118,7 @@ function Clinic({
                     >
                       <span className="patient-avatar" aria-hidden="true">{avatarFor(patient.type)}</span>
                       <span className="patient-name">{patient.name}</span>
-                      <span className="patient-kind">{patient.type}</span>
+                      <span className="patient-kind">{displayPatientType(patient.type)}</span>
                       <HealthBar value={patient.score} projected={patient.projected_score} />
                     </button>
                   ))}
@@ -137,38 +137,38 @@ function Clinic({
 function PatientPanel({ patient }: { patient: Patient | null }) {
   if (!patient) {
     return (
-      <aside className="patient-panel" aria-label="Patient details">
-        <h2>No patient selected</h2>
+      <aside className="patient-panel" aria-label="病人详情">
+        <h2>尚未选择病人</h2>
       </aside>
     );
   }
 
   return (
-    <aside className="patient-panel" aria-label={`${patient.name} treatment details`}>
+    <aside className="patient-panel" aria-label={`${patient.name} 诊疗详情`}>
       <div className="panel-head">
         <span className="patient-avatar large" aria-hidden="true">{avatarFor(patient.type)}</span>
         <div>
-          <p className="eyebrow">{patient.runner} · {patient.type}</p>
+          <p className="eyebrow">{patient.runner} · {displayPatientType(patient.type)}</p>
           <h2>{patient.name}</h2>
           <p className="path-line">{patient.path}</p>
         </div>
       </div>
-      <SummaryMeter label="Recovery" value={patient.score} projected={patient.projected_score} tone={scoreTone(patient.score)} />
+      <SummaryMeter label="恢复进度" value={patient.score} projected={patient.projected_score} tone={scoreTone(patient.score)} />
       <div className="diagnosis-row">
         <span>{summarizeFindingCount(patient)}</span>
-        <span>{patient.gate}</span>
+        <span>{displayGate(patient.gate)}</span>
       </div>
 
       <div className="treatment-list">
-        <h3>Treatment Queue</h3>
+        <h3>治疗队列</h3>
         {patient.issues.length === 0 ? (
-          <p className="quiet">No treatment needed.</p>
+          <p className="quiet">无需治疗。</p>
         ) : (
           patient.issues.map((issue) => (
             <article className={`finding tone-${scoreTone(100 - issue.deduction * 2)}`} key={issue.id}>
               <div>
                 <strong>{issue.rule_id}</strong>
-                <span>{issue.severity}</span>
+                <span>{displaySeverity(issue.severity)}</span>
               </div>
               <p>{issue.message}</p>
               <small>{issue.file}{issue.span ? `:${issue.span.line}` : ""} · {issue.evidence}</small>
@@ -218,8 +218,8 @@ function LoadingState() {
   return (
     <main className="center-state" aria-busy="true">
       <Stethoscope aria-hidden="true" />
-      <h1>Preparing the clinic</h1>
-      <p>Reading the treatment report...</p>
+      <h1>正在准备诊疗台</h1>
+      <p>正在读取治疗报告...</p>
     </main>
   );
 }
@@ -228,7 +228,7 @@ function ErrorState({ message }: { message: string }) {
   return (
     <main className="center-state" role="alert">
       <Activity aria-hidden="true" />
-      <h1>Report could not be loaded</h1>
+      <h1>报告加载失败</h1>
       <p>{message}</p>
     </main>
   );
@@ -249,6 +249,49 @@ function avatarFor(type: Patient["type"]): string {
   }
 }
 
+function displayPatientType(type: Patient["type"]): string {
+  switch (type) {
+    case "skill":
+      return "技能";
+    case "hook":
+      return "Hook";
+    case "subagent":
+      return "子代理";
+    case "config":
+      return "配置";
+    case "folder":
+      return "文件夹";
+  }
+}
+
+function displayGate(gate: SkillDoctorReport["summary"]["gate"]): string {
+  switch (gate) {
+    case "publishable":
+      return "可发布";
+    case "warning":
+      return "警告";
+    case "blocked":
+      return "阻断";
+    case "unknown":
+      return "未知";
+  }
+}
+
+function displaySeverity(severity: Patient["issues"][number]["severity"]): string {
+  switch (severity) {
+    case "critical":
+      return "严重";
+    case "high":
+      return "高";
+    case "medium":
+      return "中";
+    case "low":
+      return "低";
+    case "info":
+      return "信息";
+  }
+}
+
 function downloadText(filename: string, text: string) {
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -261,13 +304,13 @@ function downloadText(filename: string, text: string) {
 
 function markdownSummary(report: SkillDoctorReport): string {
   return [
-    "# Skill Doctor Treatment Report",
+    "# Skill Doctor 治疗报告",
     "",
-    `Health Score: ${report.summary.score} / 100`,
-    `Gate: ${report.summary.gate}`,
-    `Confidence: ${report.summary.confidence}`,
+    `健康分：${report.summary.score} / 100`,
+    `门禁：${displayGate(report.summary.gate)}`,
+    `置信度：${report.summary.confidence}`,
     "",
-    ...report.patients.map((patient) => `- ${patient.name}: ${patient.score}/100 (${patient.gate})`)
+    ...report.patients.map((patient) => `- ${patient.name}: ${patient.score}/100（${displayGate(patient.gate)}）`)
   ].join("\n");
 }
 
@@ -281,17 +324,17 @@ function downloadPng(report: SkillDoctorReport) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#f6f0df";
   ctx.font = "bold 48px monospace";
-  ctx.fillText("Skill Doctor Clinic", 64, 100);
+  ctx.fillText("Skill Doctor 诊疗台", 64, 100);
   ctx.font = "32px monospace";
-  ctx.fillText(`Health Score: ${report.summary.score}/100`, 64, 170);
-  ctx.fillText(`Gate: ${report.summary.gate}`, 64, 220);
+  ctx.fillText(`健康分：${report.summary.score}/100`, 64, 170);
+  ctx.fillText(`门禁：${displayGate(report.summary.gate)}`, 64, 220);
   ctx.fillStyle = "#2b3a42";
   ctx.fillRect(64, 270, 800, 44);
   ctx.fillStyle = "#79c267";
   ctx.fillRect(64, 270, Math.round(800 * report.summary.score / 100), 44);
   ctx.fillStyle = "#f6f0df";
   ctx.font = "24px monospace";
-  ctx.fillText(`${report.patients.length} patients · ${report.summary.blockers} blockers · ${report.summary.warnings} warnings`, 64, 370);
+  ctx.fillText(`${report.patients.length} 个病人 · ${report.summary.blockers} 个阻断项 · ${report.summary.warnings} 个警告`, 64, 370);
   const url = canvas.toDataURL("image/png");
   const link = document.createElement("a");
   link.href = url;

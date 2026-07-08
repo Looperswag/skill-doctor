@@ -23,7 +23,7 @@ describe("createProgram", () => {
     const summary = await readFile(join(outDir, "summary.md"), "utf8");
     const report = JSON.parse(await readFile(join(outDir, "report.json"), "utf8")) as { schema_version: string };
     await expect(stat(join(outDir, "findings.jsonl"))).resolves.toBeTruthy();
-    expect(summary).toContain("Skill Doctor Treatment Report");
+    expect(summary).toContain("Skill Doctor 治疗报告");
     expect(report.schema_version).toBe("skill-doctor.report.v1");
   });
 

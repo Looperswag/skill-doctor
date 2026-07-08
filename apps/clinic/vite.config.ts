@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "../../packages/cli/dist/clinic",
-    emptyOutDir: false
+    emptyOutDir: true
   }
 });

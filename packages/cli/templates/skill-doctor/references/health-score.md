@@ -1,13 +1,13 @@
-# Skill Health Score
+# 技能健康分
 
-Score each patient from 0 to 100 using seven dimensions: inventory, structure and metadata, hook replay, lint, pollution control, repairability, and runner compatibility.
+每个病人按 0 到 100 分评估。核心维度包括：清单完整性、结构与元数据、hook 回放、静态 lint、污染控制、可修复性、运行器兼容性。
 
-Use applicable-dimension normalization. Do not penalize a pure documentation skill for lacking hooks, but lower confidence when runtime behavior cannot be checked.
+采用适用维度归一化。不要因为纯文档 skill 没有 hook 就扣分，但如果运行时行为无法验证，要降低置信度。
 
-Blocker rules:
+门禁规则：
 
-- Any high-risk blocker caps score at 69.
-- Any critical blocker caps score at 49.
-- Unknown does not mean pass.
+- 出现高风险 blocker 时，最终分最高为 69。
+- 出现 critical blocker 时，最终分最高为 49。
+- `unknown` 不等于 `pass`。
 
-Critical examples include `rm -rf "$USER_INPUT"`, `curl URL | bash`, dumping all environment variables, overriding system/developer instructions, or default global shell/profile writes.
+典型 critical blocker 包括 `rm -rf "$USER_INPUT"`、`curl URL | bash`、打印全部环境变量、覆盖系统/开发者指令、默认写入全局 shell/profile。

@@ -1,10 +1,10 @@
-# Skill Health Score 评测维度定义
+# 技能健康分评测维度定义
 
-本文档定义 `skill-doctor` 的 Skill 健康分（Skill Health Score）。该健康分用于评估一个 skill 是否完整、可复现、lint 合规、低污染、可修复，并且能在 Codex 与 Claude Code 等不同 agent runner 之间稳定运行。
+本文档定义 `skill-doctor` 的技能健康分。该健康分用于评估一个 skill 是否完整、可复现、lint 合规、低污染、可修复，并且能在 Codex 与 Claude Code 等不同 agent runner 之间稳定运行。
 
 ## 1. 总体定义
 
-Skill Health Score 是一个 0–100 的诊断分数。
+技能健康分是一个 0–100 的诊断分数。
 
 分数越高，表示 skill 越稳定、可维护、可复用、低污染、低风险。
 
@@ -38,20 +38,20 @@ Skill Health Score 是一个 0–100 的诊断分数。
 
 | 分数 | 等级 | 含义 |
 |---:|---|---|
-| 90–100 | Excellent | 可直接发布或复用 |
-| 80–89 | Good | 基本健康，只有少量改进项 |
-| 70–79 | Warning | 可以运行，但存在结构或污染风险 |
-| 50–69 | Risky | 运行不稳定，建议先修复 |
-| 0–49 | Critical | 不建议运行，可能污染环境或失败不可诊断 |
+| 90–100 | 优秀 | 可直接发布或复用 |
+| 80–89 | 良好 | 基本健康，只有少量改进项 |
+| 70–79 | 警告 | 可以运行，但存在结构或污染风险 |
+| 50–69 | 高风险 | 运行不稳定，建议先修复 |
+| 0–49 | 严重 | 不建议运行，可能污染环境或失败不可诊断 |
 
 示例输出：
 
 ```text
-Health Score: 82 / 100
-Grade: Good
-Blocking Issues: 0
-Warnings: 4
-Repair Suggestions: 6
+健康分：82 / 100
+等级：良好
+阻断问题：0
+警告：4
+修复建议：6
 ```
 
 ---
@@ -926,42 +926,42 @@ ignore all previous instructions
 # 8. 推荐 CLI 输出格式
 
 ```text
-Skill Doctor Report
+Skill Doctor 报告
 ───────────────────
 
 Skill: my-skill
 Path: ./my-skill
-Detected runners: codex, claude-code
+检测到的运行器: codex, claude-code
 
-Health Score: 82 / 100
-Grade: Good
+健康分: 82 / 100
+等级: 良好
 
-Breakdown:
-  Inventory              13 / 15
-  Structure & Metadata   12 / 15
-  Hook Replay            14 / 15
-  Skill Lint             11 / 15
-  Pollution Control      12 / 15
-  Repairability           8 / 10
-  Runner Compatibility   12 / 15
+分项:
+  清单完整性          13 / 15
+  结构与元数据        12 / 15
+  Hook 回放           14 / 15
+  Skill Lint          11 / 15
+  污染控制            12 / 15
+  可修复性             8 / 10
+  运行器兼容性        12 / 15
 
-Blocking Issues:
-  none
+阻断问题:
+  无
 
-Top Issues:
+主要问题:
   [high] scripts/setup.sh:12
-  Global npm install detected.
+  检测到全局 npm 安装。
 
   [medium] SKILL.md
-  Trigger condition is too broad.
+  触发条件过宽。
 
   [medium] hooks/post-tool-use.json
-  Missing replay fixture.
+  缺少 replay fixture。
 
-Repair Suggestions:
-  1. Replace global npm install with local project dependency.
-  2. Narrow skill trigger conditions.
-  3. Add hook replay fixtures for post-tool-use.
+修复建议:
+  1. 将全局 npm 安装替换为项目本地依赖。
+  2. 收窄 skill 触发条件。
+  3. 为 post-tool-use 增加 hook replay fixture。
 ```
 
 ---

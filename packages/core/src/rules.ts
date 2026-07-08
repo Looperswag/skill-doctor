@@ -81,8 +81,8 @@ async function analyzeSkill(patient: PatientDraft, files: FileContent[], finding
       category: "inventory",
       file: patient.path,
       evidence: "SKILL.md",
-      message: "Skill folder does not contain a SKILL.md entrypoint.",
-      suggestion: "Add a SKILL.md file with name and description frontmatter.",
+      message: "Skill 文件夹缺少 SKILL.md 入口文件。",
+      suggestion: "添加包含 name 和 description frontmatter 的 SKILL.md 文件。",
       autofix: "manual_only"
     });
     return;
@@ -96,8 +96,8 @@ async function analyzeSkill(patient: PatientDraft, files: FileContent[], finding
       category: "structure",
       file: skillFile.relative,
       evidence: "--- name / description ---",
-      message: "Skill frontmatter must include name and description.",
-      suggestion: "Add concise name and trigger-focused description fields to SKILL.md.",
+      message: "Skill frontmatter 必须包含 name 和 description。",
+      suggestion: "在 SKILL.md 中添加简洁的 name 和聚焦触发条件的 description。",
       autofix: "review_required",
       line: 1
     });
@@ -112,8 +112,8 @@ async function analyzeSkill(patient: PatientDraft, files: FileContent[], finding
         category: "inventory",
         file: skillFile.relative,
         evidence: reference,
-        message: "Skill instructions reference a missing bundled resource.",
-        suggestion: "Create the referenced file or rewrite the instruction as an example path.",
+        message: "Skill 指令引用了不存在的内置资源。",
+        suggestion: "创建被引用的文件，或将该路径改写为明确的示例路径。",
         autofix: "review_required",
         line: findLine(skillFile.text, reference)
       });
@@ -132,8 +132,8 @@ function analyzeSubagent(files: FileContent[], findings: FindingInput[]) {
         category: "structure",
         file: file.relative,
         evidence: "name / description",
-        message: "Subagent file should declare a name and description.",
-        suggestion: "Add YAML frontmatter with name and description so the runner can select it reliably.",
+        message: "Subagent 文件应声明 name 和 description。",
+        suggestion: "添加包含 name 和 description 的 YAML frontmatter，方便运行器可靠选择。",
         autofix: "review_required",
         line: 1
       });
@@ -153,8 +153,8 @@ function analyzeConfig(files: FileContent[], findings: FindingInput[]) {
           category: "lint",
           file: file.relative,
           evidence: error instanceof Error ? error.message : "invalid json",
-          message: "Configuration JSON could not be parsed.",
-          suggestion: "Fix the JSON syntax before relying on this hook or settings file.",
+          message: "配置 JSON 无法解析。",
+          suggestion: "先修复 JSON 语法，再依赖该 hook 或 settings 文件。",
           autofix: "manual_only",
           line: 1
         });
@@ -168,8 +168,8 @@ function analyzeConfig(files: FileContent[], findings: FindingInput[]) {
         category: "hook_replay",
         file: file.relative,
         evidence: "hook config without fixture path",
-        message: "Hook configuration has no replay fixture reference.",
-        suggestion: "Add replay fixtures for critical hook events so behavior can be reproduced safely.",
+        message: "Hook 配置缺少 replay fixture 引用。",
+        suggestion: "为关键 hook 事件添加 replay fixture，确保行为可安全复现。",
         autofix: "manual_only"
       });
     }
@@ -191,8 +191,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: "critical",
       category: "pollution",
       pattern: /(ignore|override).{0,30}(previous|system|developer) instructions|覆盖系统|覆盖开发者/iu,
-      message: "Instruction attempts to override higher-priority guidance.",
-      suggestion: "Remove any instruction that asks the agent to ignore system, developer, or safety rules.",
+      message: "指令试图覆盖更高优先级的规则。",
+      suggestion: "删除任何要求 Agent 忽略系统、开发者或安全规则的指令。",
       autofix: "do_not_autofix"
     },
     {
@@ -200,8 +200,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: "medium",
       category: "pollution",
       pattern: /\b(always|must)\s+use\s+this\s+skill\b/iu,
-      message: "Trigger wording is broad enough to pollute unrelated tasks.",
-      suggestion: "Replace broad trigger language with concrete task and context boundaries.",
+      message: "触发描述过宽，可能污染无关任务。",
+      suggestion: "用具体任务和上下文边界替换过宽的触发语言。",
       autofix: "review_required"
     },
     {
@@ -209,8 +209,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: "high",
       category: "pollution",
       pattern: /\b(npm|pnpm|yarn)\s+install\s+-g\b|\bpip\s+install\s+--user\b/iu,
-      message: "Script performs a global package installation.",
-      suggestion: "Use project-local dependencies or document this as an explicit manual step.",
+      message: "脚本执行了全局包安装。",
+      suggestion: "改用项目本地依赖，或将该操作声明为需要用户确认的手动步骤。",
       autofix: "manual_only"
     },
     {
@@ -218,8 +218,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: "critical",
       category: "security",
       pattern: /\bcurl\b[^\n|]*\|\s*(bash|sh)\b/iu,
-      message: "Script downloads remote code and executes it immediately.",
-      suggestion: "Download, verify, and review installer content before execution.",
+      message: "脚本下载远程代码后立即执行。",
+      suggestion: "先下载、校验并审查安装内容，再执行。",
       autofix: "do_not_autofix"
     },
     {
@@ -227,8 +227,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: "critical",
       category: "security",
       pattern: /\brm\s+-rf\s+["']?\$\{?\w+|\brm\s+-rf\s+\//iu,
-      message: "Dangerous deletion pattern detected.",
-      suggestion: "Constrain deletion to a known temporary directory and validate inputs.",
+      message: "检测到危险删除模式。",
+      suggestion: "将删除范围限制在明确的临时目录内，并校验输入。",
       autofix: "do_not_autofix"
     },
     {
@@ -236,8 +236,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: "high",
       category: "security",
       pattern: /\bprintenv\b/iu,
-      message: "Script may dump secrets from the environment.",
-      suggestion: "Log only named, non-sensitive variables required for diagnosis.",
+      message: "脚本可能将环境变量中的 secret 打入日志。",
+      suggestion: "只记录诊断所需的具名非敏感变量。",
       autofix: "manual_only"
     },
     {
@@ -245,8 +245,8 @@ function analyzeTextRisk(files: FileContent[], findings: FindingInput[], patient
       severity: patient.scope === "legacy" ? "medium" : "low",
       category: "compatibility",
       pattern: /~\/\.claude|~\/\.codex|\/Users\/[A-Za-z0-9._-]+/u,
-      message: "Hard-coded user or runner path reduces portability.",
-      suggestion: "Use runner-provided home variables or document fallback paths explicitly.",
+      message: "硬编码用户或运行器路径会降低可迁移性。",
+      suggestion: "使用运行器提供的 home 变量，或明确记录 fallback 路径。",
       autofix: "review_required"
     }
   ];

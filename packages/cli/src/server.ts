@@ -83,7 +83,7 @@ function fallbackHtml(report: SkillDoctorReport): string {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Skill Doctor Clinic</title>
+  <title>Skill Doctor 诊疗台</title>
   <style>
     body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #101820; color: #f6f0df; }
     main { max-width: 880px; margin: 0 auto; padding: 48px 20px; }
@@ -94,11 +94,24 @@ function fallbackHtml(report: SkillDoctorReport): string {
 </head>
 <body>
   <main>
-    <h1>Skill Doctor Clinic</h1>
-    <p>The bundled React clinic has not been built yet, but the report server is running.</p>
+    <h1>Skill Doctor 诊疗台</h1>
+    <p>内置 React 诊疗台尚未构建，但报告服务已经启动。</p>
     <div class="bar"><span></span></div>
-    <p>Health score: ${report.summary.score} / 100 · Gate: ${report.summary.gate}</p>
+    <p>健康分：${report.summary.score} / 100 · 门禁：${displayGate(report.summary.gate)}</p>
   </main>
 </body>
 </html>`;
+}
+
+function displayGate(gate: SkillDoctorReport["summary"]["gate"]): string {
+  switch (gate) {
+    case "publishable":
+      return "可发布";
+    case "warning":
+      return "警告";
+    case "blocked":
+      return "阻断";
+    case "unknown":
+      return "未知";
+  }
 }

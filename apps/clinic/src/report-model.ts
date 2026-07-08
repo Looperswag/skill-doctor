@@ -10,9 +10,9 @@ export interface Ward {
 }
 
 const WARD_LABELS: Record<Runner, string> = {
-  codex: "Codex Ward",
-  claude: "Claude Ward",
-  generic: "Generic Ward"
+  codex: "Codex 病区",
+  claude: "Claude 病区",
+  generic: "通用病区"
 };
 
 export function groupPatientsByWard(report: SkillDoctorReport): Ward[] {
@@ -41,7 +41,7 @@ export function scoreTone(score: number): Tone {
 }
 
 export function summarizeFindingCount(patient: Patient): string {
-  if (patient.issues.length === 0) return "No findings";
+  if (patient.issues.length === 0) return "无发现项";
   const blockers = patient.issues.filter((issue) => issue.severity === "critical" || issue.severity === "high").length;
-  return `${patient.issues.length} findings · ${blockers} blockers`;
+  return `${patient.issues.length} 个发现项 · ${blockers} 个阻断项`;
 }

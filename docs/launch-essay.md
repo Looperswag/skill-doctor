@@ -24,7 +24,7 @@ Loop 解决「系统如何从运行中自我改进」。
 
 > 把 skill 当运行时代码测，而不是当 Markdown 看。
 
-roadmap belike：
+路线图大概是：
 
 01 - skill 不是文档  
 02 - 能力链在哪断  
@@ -35,7 +35,7 @@ roadmap belike：
 07 - 修复要克制  
 08 - 放进 CI  
 09 - 冷静复盘  
-10 - In the end
+10 - 最后
 
 ---
 
@@ -616,7 +616,7 @@ pull request
 
 其他问题先作为 warning。
 
-WHY？
+为什么？
 
 因为新工具如果一上来就把所有东西都卡死，团队第一反应不是修问题，而是关掉它。
 
@@ -741,7 +741,7 @@ runner adapter 分别实现
 
 ---
 
-## 10 - In the end
+## 10 - 最后
 
 我越来越觉得，Agent 工程的下一阶段不是「再多加几个工具」，而是把工具、skills、hooks、memory、runner 这些东西纳入可测试、可诊断、可迁移的工程体系。
 

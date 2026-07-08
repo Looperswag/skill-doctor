@@ -384,7 +384,7 @@ skill-doctor 报告
 
 Skill: my-skill
 Path: ./my-skill
-Detected runners: codex, claude-code
+检测到的运行器: codex, claude-code
 
 健康分: 86 / 100
 置信度: 0.91
