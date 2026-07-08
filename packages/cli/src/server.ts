@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { spawn } from "node:child_process";
 import type { SkillDoctorReport } from "@skill-doctor/core";
+import { ReportStore, type ClinicEvent } from "./live.js";
 import { clinicStaticDir } from "./paths.js";
 
 export interface ClinicServer {
@@ -10,14 +11,36 @@ export interface ClinicServer {
   url: string;
 }
 
-export async function startClinicServer(report: SkillDoctorReport, port: number): Promise<ClinicServer> {
+export async function startClinicServer(report: SkillDoctorReport | ReportStore, port: number): Promise<ClinicServer> {
+  const store = report instanceof ReportStore ? report : new ReportStore(report);
   const staticDir = clinicStaticDir();
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
 
     if (url.pathname === "/api/report") {
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify(report));
+      response.end(JSON.stringify(store.getReport()));
+      return;
+    }
+
+    if (url.pathname === "/api/events") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-accel-buffering": "no"
+      });
+      writeSse(response, store.getSnapshot());
+
+      const unsubscribe = store.subscribe((event) => writeSse(response, event));
+      const heartbeat = setInterval(() => {
+        response.write(`: heartbeat ${Date.now()}\n\n`);
+      }, 15000);
+
+      request.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
       return;
     }
 
@@ -36,7 +59,7 @@ export async function startClinicServer(report: SkillDoctorReport, port: number)
     }
 
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(fallbackHtml(report));
+    response.end(fallbackHtml(store.getReport()));
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -50,6 +73,12 @@ export async function startClinicServer(report: SkillDoctorReport, port: number)
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
   return { server, url: `http://127.0.0.1:${actualPort}` };
+}
+
+function writeSse(response: NodeJS.WritableStream, event: ClinicEvent): void {
+  response.write(`id: ${event.version}\n`);
+  response.write(`event: ${event.type}\n`);
+  response.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 export async function openBrowser(url: string): Promise<void> {

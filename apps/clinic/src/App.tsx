@@ -10,6 +10,7 @@ import {
   Gauge,
   HeartPulse,
   ImageDown,
+  RefreshCw,
   ShieldAlert,
   Sparkles,
   Stethoscope,
@@ -37,30 +38,182 @@ type LoadState =
   | { state: "error"; message: string }
   | { state: "ready"; report: SkillDoctorReport };
 
+type LiveState =
+  | { state: "connecting"; message: string; updatedAt?: string }
+  | { state: "ready"; message: string; updatedAt?: string; version?: number }
+  | { state: "scanning"; message: string; updatedAt?: string; version?: number }
+  | { state: "error"; message: string; updatedAt?: string; version?: number };
+
+type ClinicLivePayload =
+  | {
+      type: "snapshot";
+      version: number;
+      state: "idle" | "scanning" | "error";
+      updated_at: string;
+      report: SkillDoctorReport;
+      error?: string;
+    }
+  | {
+      type: "scan:start";
+      version: number;
+      state: "scanning";
+      updated_at: string;
+    }
+  | {
+      type: "scan:complete";
+      version: number;
+      state: "idle";
+      updated_at: string;
+      report: SkillDoctorReport;
+    }
+  | {
+      type: "scan:error";
+      version: number;
+      state: "error";
+      updated_at: string;
+      message: string;
+      report: SkillDoctorReport;
+    };
+
 export function App() {
   const [loadState, setLoadState] = useState<LoadState>({ state: "loading" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [liveState, setLiveState] = useState<LiveState>({
+    state: "connecting",
+    message: "正在连接实时复诊"
+  });
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/report")
-      .then((response) => {
-        if (!response.ok) throw new Error(`报告请求失败：${response.status}`);
-        return response.json() as Promise<SkillDoctorReport>;
-      })
-      .then((report) => {
+    let eventSource: EventSource | undefined;
+    let pollingTimer: number | undefined;
+
+    const applyReport = (report: SkillDoctorReport) => {
+      setLoadState({ state: "ready", report });
+      setSelectedId((currentId) => {
+        if (currentId && report.patients.some((patient) => patient.id === currentId)) return currentId;
+        return report.patients[0]?.id ?? null;
+      });
+    };
+
+    const startPolling = (message: string) => {
+      if (pollingTimer) return;
+      setLiveState({ state: "ready", message });
+      pollingTimer = window.setInterval(() => {
+        void fetchReport()
+          .then((report) => {
+            if (cancelled) return;
+            applyReport(report);
+            setLiveState({
+              state: "ready",
+              message: "轮询复诊中",
+              updatedAt: report.generated_at
+            });
+          })
+          .catch((error: unknown) => {
+            if (cancelled) return;
+            setLiveState({
+              state: "error",
+              message: error instanceof Error ? `轮询报告失败：${error.message}` : "轮询报告失败，已保留最近报告"
+            });
+          });
+      }, 4000);
+    };
+
+    const startEvents = () => {
+      if (!("EventSource" in window)) {
+        startPolling("浏览器不支持实时事件，已切换为轮询复诊");
+        return;
+      }
+
+      eventSource = new EventSource("/api/events");
+      eventSource.onopen = () => {
         if (!cancelled) {
-          setLoadState({ state: "ready", report });
-          setSelectedId(report.patients[0]?.id ?? null);
+          setLiveState((current) => ({
+            state: current.state === "scanning" ? "scanning" : "ready",
+            message: current.state === "scanning" ? "复诊中" : "实时监听中",
+            ...(current.updatedAt ? { updatedAt: current.updatedAt } : {}),
+            ...("version" in current && current.version !== undefined ? { version: current.version } : {})
+          }));
         }
+      };
+
+      eventSource.addEventListener("snapshot", (event) => {
+        const payload = parseLivePayload(event);
+        if (!payload || payload.type !== "snapshot" || cancelled) return;
+        applyReport(payload.report);
+        setLiveState({
+          state: payload.state === "scanning" ? "scanning" : payload.state === "error" ? "error" : "ready",
+          message: payload.error ?? (payload.state === "scanning" ? "复诊中" : "实时监听中"),
+          updatedAt: payload.updated_at,
+          version: payload.version
+        });
+      });
+
+      eventSource.addEventListener("scan:start", (event) => {
+        const payload = parseLivePayload(event);
+        if (!payload || payload.type !== "scan:start" || cancelled) return;
+        setLiveState({
+          state: "scanning",
+          message: "复诊中",
+          updatedAt: payload.updated_at,
+          version: payload.version
+        });
+      });
+
+      eventSource.addEventListener("scan:complete", (event) => {
+        const payload = parseLivePayload(event);
+        if (!payload || payload.type !== "scan:complete" || cancelled) return;
+        applyReport(payload.report);
+        setLiveState({
+          state: "ready",
+          message: "实时监听中",
+          updatedAt: payload.updated_at,
+          version: payload.version
+        });
+      });
+
+      eventSource.addEventListener("scan:error", (event) => {
+        const payload = parseLivePayload(event);
+        if (!payload || payload.type !== "scan:error" || cancelled) return;
+        applyReport(payload.report);
+        setLiveState({
+          state: "error",
+          message: payload.message,
+          updatedAt: payload.updated_at,
+          version: payload.version
+        });
+      });
+
+      eventSource.onerror = () => {
+        if (cancelled) return;
+        eventSource?.close();
+        eventSource = undefined;
+        startPolling("实时连接中断，已切换为轮询复诊");
+      };
+    };
+
+    void fetchReport()
+      .then((report) => {
+        if (cancelled) return;
+        applyReport(report);
+        setLiveState({
+          state: "connecting",
+          message: "正在连接实时复诊",
+          updatedAt: report.generated_at
+        });
+        startEvents();
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setLoadState({ state: "error", message: error instanceof Error ? error.message : "无法加载报告" });
         }
       });
+
     return () => {
       cancelled = true;
+      eventSource?.close();
+      if (pollingTimer) window.clearInterval(pollingTimer);
     };
   }, []);
 
@@ -69,16 +222,18 @@ export function App() {
 
   const selectedPatient = loadState.report.patients.find((patient) => patient.id === selectedId) ?? loadState.report.patients[0] ?? null;
   return (
-    <Clinic report={loadState.report} selectedPatient={selectedPatient} onSelectPatient={setSelectedId} />
+    <Clinic report={loadState.report} liveState={liveState} selectedPatient={selectedPatient} onSelectPatient={setSelectedId} />
   );
 }
 
 function Clinic({
   report,
+  liveState,
   selectedPatient,
   onSelectPatient
 }: {
   report: SkillDoctorReport;
+  liveState: LiveState;
   selectedPatient: Patient | null;
   onSelectPatient: (id: string) => void;
 }) {
@@ -102,6 +257,7 @@ function Clinic({
         </div>
 
         <div className="app-actions">
+          <LivePill liveState={liveState} />
           <GatePill gate={report.summary.gate} />
           <div className={`score-chip tone-${tone}`} aria-label={`整体健康分 ${report.summary.score} 分，满分 100 分`}>
             <Stethoscope aria-hidden="true" size={18} />
@@ -171,6 +327,43 @@ function Clinic({
       )}
     </main>
   );
+}
+
+async function fetchReport(): Promise<SkillDoctorReport> {
+  const response = await fetch("/api/report");
+  if (!response.ok) throw new Error(`报告请求失败：${response.status}`);
+  return response.json() as Promise<SkillDoctorReport>;
+}
+
+function parseLivePayload(event: Event): ClinicLivePayload | null {
+  try {
+    return JSON.parse((event as MessageEvent<string>).data) as ClinicLivePayload;
+  } catch {
+    return null;
+  }
+}
+
+function LivePill({ liveState }: { liveState: LiveState }) {
+  const isScanning = liveState.state === "scanning";
+  const icon = isScanning
+    ? <RefreshCw aria-hidden="true" size={15} />
+    : liveState.state === "error"
+      ? <AlertTriangle aria-hidden="true" size={15} />
+      : <HeartPulse aria-hidden="true" size={15} />;
+
+  return (
+    <span className={`live-pill live-${liveState.state}`} role="status" aria-live="polite" title={liveState.message}>
+      {icon}
+      <span>{liveStatusLabel(liveState)}</span>
+    </span>
+  );
+}
+
+function liveStatusLabel(liveState: LiveState): string {
+  if (liveState.state === "scanning") return "复诊中";
+  if (liveState.state === "error") return liveState.message;
+  const suffix = liveState.updatedAt ? ` · ${formatClock(liveState.updatedAt)}` : "";
+  return `${liveState.message}${suffix}`;
 }
 
 function MetricCard({
@@ -652,5 +845,15 @@ function formatDateTime(value: string): string {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit"
+  }).format(date);
+}
+
+function formatClock(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
   }).format(date);
 }

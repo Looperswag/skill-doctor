@@ -6,7 +6,9 @@ import { scan, type Runner, type ScanOptions } from "@skill-doctor/core";
 import { installSkill, type InstallTarget } from "./install.js";
 import { fixtureHome } from "./paths.js";
 import { formatReport, readReport, writeReportFiles, type OutputFormat } from "./io.js";
+import { ReportStore } from "./live.js";
 import { openBrowser, startClinicServer } from "./server.js";
+import { startClinicWatcher } from "./watch.js";
 
 interface ProgramEnv {
   stdout?: NodeJS.WritableStream;
@@ -51,14 +53,25 @@ export function createProgram(env: ProgramEnv = {}): Command {
     .option("--port <port>", "Local server port", "0")
     .option("--out <dir>", "Write report artifacts before serving")
     .option("--no-open", "Do not open a browser")
+    .option("--no-watch", "Disable live rescans when scanned files change")
     .action(async (options: Record<string, string | boolean | undefined>) => {
-      const report = await scan(buildScanOptions(options));
+      const scanOptions = buildScanOptions(options);
+      const report = await scan(scanOptions);
       const outDir = options.out ? String(options.out) : await mkdtemp(join(tmpdir(), "skill-doctor-clinic-"));
       await writeReportFiles(report, outDir);
-      const clinic = await startClinicServer(report, Number(options.port ?? 0));
+      const store = new ReportStore(report);
+      const clinic = await startClinicServer(store, Number(options.port ?? 0));
+      const watcher = options.watch === false
+        ? undefined
+        : await startClinicWatcher({ scanOptions, outDir, store });
       stdout.write(`Skill Doctor clinic: ${clinic.url}\nReport artifacts: ${outDir}\n`);
+      stdout.write(`Live watch: ${watcher ? `enabled (${watcher.watchedPaths.length} roots)` : "disabled"}\n`);
       if (options.open !== false) await openBrowser(clinic.url);
-      await waitForStop(clinic.server);
+      try {
+        await waitForStop(clinic.server);
+      } finally {
+        watcher?.close();
+      }
     });
 
   program

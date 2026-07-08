@@ -159,6 +159,7 @@ a {
 
 .gate-pill,
 .status-pill,
+.live-pill,
 .runner-pill,
 .score-chip,
 .export-button {
@@ -169,6 +170,7 @@ a {
 }
 
 .gate-pill,
+.live-pill,
 .status-pill {
   gap: 6px;
   border: 1px solid transparent;
@@ -179,6 +181,37 @@ a {
 .gate-pill {
   min-height: 38px;
   padding: 8px 12px;
+}
+
+.live-pill {
+  min-height: 38px;
+  max-width: 230px;
+  padding: 8px 12px;
+  border-color: rgba(19, 168, 229, 0.22);
+  background: #edf7fd;
+  color: var(--blue-deep);
+}
+
+.live-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-scanning {
+  border-color: rgba(216, 146, 31, 0.3);
+  background: var(--amber-soft);
+  color: #8a5a08;
+}
+
+.live-scanning svg {
+  animation: live-spin 900ms linear infinite;
+}
+
+.live-error {
+  border-color: rgba(226, 76, 75, 0.24);
+  background: var(--red-soft);
+  color: var(--danger);
 }
 
 .status-pill {
@@ -259,6 +292,12 @@ a {
   box-shadow: 0 10px 24px rgba(19, 168, 229, 0.14);
   outline: none;
   transform: translateY(-1px);
+}
+
+@keyframes live-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .metric-grid {
