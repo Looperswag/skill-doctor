@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import type { SkillDoctorReport } from "@skill-doctor/core";
 import { describe, expect, test } from "vitest";
 import { ReportStore } from "./live.js";
+import { RepairCoordinator } from "./repair.js";
 import { startClinicServer } from "./server.js";
 
 describe("startClinicServer", () => {
@@ -29,9 +30,14 @@ describe("startClinicServer", () => {
     }
   });
 
-  test("accepts a repair request and streams repair progress", async () => {
+  test("keeps report state factual after a manual-only repair flow", async () => {
     const store = new ReportStore(makeRepairReport());
-    const clinic = await startClinicServer(store, 0);
+    const coordinator = new RepairCoordinator({
+      store,
+      scanFn: async () => makeRepairReport(),
+      stepDelayMs: 1
+    });
+    const clinic = await startClinicServer(store, 0, { repairCoordinator: coordinator });
     const stream = await fetch(`${clinic.url}/api/events`);
     const reader = stream.body?.getReader();
 
@@ -39,34 +45,152 @@ describe("startClinicServer", () => {
     if (!reader) throw new Error("事件流不可读");
 
     try {
-      const repair = await fetchJson<{ job_id: string; status: string; message: string }>(`${clinic.url}/api/repairs`, {
+      const repair = await fetchJson<{ job_id: string; total: number; manual_required: number }>(`${clinic.url}/api/repairs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ patient_id: "codex:skill:demo" })
       });
 
-      expect(repair.status).toBe("running");
+      expect(repair.total).toBe(1);
+      expect(repair.manual_required).toBe(1);
       expect(repair.job_id).toMatch(/^repair-/u);
 
-      const itemText = await readUntil(reader, "event: repair:item-complete");
+      const itemText = await readUntil(reader, "event: repair:item-skipped");
       expect(itemText).toContain("\"finding_id\":\"finding-1\"");
 
-      const eventText = await readUntil(reader, "event: repair:complete");
-      expect(eventText).toContain("\"patient_id\":\"codex:skill:demo\"");
-      expect(eventText).toContain("\"progress\":100");
+      const eventText = itemText.includes("event: repair:batch-complete")
+        ? itemText
+        : await readUntil(reader, "event: repair:batch-complete");
+      expect(eventText).toContain("\"manual_required\":1");
 
       const updated = await fetchJson<SkillDoctorReport>(`${clinic.url}/api/report`);
       expect(updated.patients[0]).toMatchObject({
         id: "codex:skill:demo",
-        score: 100,
-        projected_score: 100,
-        gate: "publishable",
-        grade: "excellent",
-        issues: []
+        score: 49,
+        gate: "blocked"
       });
-      expect(updated.findings).toEqual([]);
-      expect(updated.summary.gate).toBe("publishable");
-      expect(updated.summary.blockers).toBe(0);
+      expect(updated.patients[0]?.issues).toHaveLength(1);
+      expect(updated.summary.gate).toBe("blocked");
+      expect(updated.summary.blockers).toBe(1);
+    } finally {
+      await reader.cancel();
+      await closeServer(clinic.server);
+    }
+  });
+
+  test("runs one-click repair as a single batch without optimistic report healing", async () => {
+    const initial = makeRepairReport([
+      { id: "finding-1", patientId: "codex:skill:demo-a", autofix: "review_required" },
+      { id: "finding-2", patientId: "codex:skill:demo-b", autofix: "manual_only" }
+    ]);
+    const store = new ReportStore(initial);
+    const coordinator = new RepairCoordinator({
+      store,
+      scanFn: async () => initial,
+      stepDelayMs: 1
+    });
+    const clinic = await startClinicServer(store, 0, { repairCoordinator: coordinator });
+    const stream = await fetch(`${clinic.url}/api/events`);
+    const reader = stream.body?.getReader();
+
+    if (!reader) throw new Error("事件流不可读");
+
+    try {
+      const repair = await fetchJson<{ job_id: string; total: number; manual_required: number }>(`${clinic.url}/api/repairs/all`, {
+        method: "POST"
+      });
+
+      expect(repair.total).toBe(2);
+      expect(repair.manual_required).toBe(2);
+
+      const eventText = await readUntil(reader, "event: repair:batch-complete");
+      expect(eventText).toContain("\"total\":2");
+
+      const updated = await fetchJson<SkillDoctorReport>(`${clinic.url}/api/report`);
+      expect(updated.patients.map((patient) => patient.gate)).toEqual(["blocked", "blocked"]);
+      expect(updated.findings).toHaveLength(2);
+    } finally {
+      await reader.cancel();
+      await closeServer(clinic.server);
+    }
+  });
+
+  test("rejects a second repair batch while one-click repair is running", async () => {
+    const initial = makeRepairReport([
+      { id: "finding-1", patientId: "codex:skill:demo-a", autofix: "review_required" },
+      { id: "finding-2", patientId: "codex:skill:demo-b", autofix: "manual_only" }
+    ]);
+    const store = new ReportStore(initial);
+    const coordinator = new RepairCoordinator({
+      store,
+      scanFn: async () => initial,
+      stepDelayMs: 40
+    });
+    const clinic = await startClinicServer(store, 0, { repairCoordinator: coordinator });
+
+    try {
+      const first = await fetch(`${clinic.url}/api/repairs/all`, { method: "POST" });
+      const second = await fetch(`${clinic.url}/api/repairs/all`, { method: "POST" });
+      const secondBody = await second.json() as { message?: string };
+
+      expect(first.status).toBe(202);
+      expect(second.status).toBe(409);
+      expect(secondBody.message).toContain("已有治疗任务运行中");
+    } finally {
+      await closeServer(clinic.server);
+    }
+  });
+
+  test("marks safe autofix publishable only after the final rescan confirms it", async () => {
+    const initial = makeRepairReport([
+      { id: "finding-1", patientId: "codex:skill:demo", autofix: "safe_autofix" }
+    ]);
+    const clean = makeHealthyRepairReport(["codex:skill:demo"]);
+    let releaseScan!: () => void;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    const store = new ReportStore(initial);
+    const coordinator = new RepairCoordinator({
+      store,
+      scanFn: async () => {
+        await scanGate;
+        return clean;
+      },
+      applySafeAutofixFn: async () => ({
+        applied: true,
+        message: "已写入安全修复"
+      }),
+      stepDelayMs: 1
+    });
+    const clinic = await startClinicServer(store, 0, { repairCoordinator: coordinator });
+    const stream = await fetch(`${clinic.url}/api/events`);
+    const reader = stream.body?.getReader();
+
+    if (!reader) throw new Error("事件流不可读");
+
+    try {
+      const repair = await fetchJson<{ auto_fixable: number; manual_required: number }>(`${clinic.url}/api/repairs/all`, {
+        method: "POST"
+      });
+      expect(repair.auto_fixable).toBe(1);
+      expect(repair.manual_required).toBe(0);
+
+      await readUntil(reader, "event: repair:item-applied");
+      const beforeRescan = await fetchJson<SkillDoctorReport>(`${clinic.url}/api/report`);
+      expect(beforeRescan.summary.gate).toBe("blocked");
+      expect(beforeRescan.findings).toHaveLength(1);
+
+      releaseScan();
+      await readUntil(reader, "event: repair:batch-complete");
+
+      const afterRescan = await fetchJson<SkillDoctorReport>(`${clinic.url}/api/report`);
+      expect(afterRescan.summary.gate).toBe("publishable");
+      expect(afterRescan.findings).toHaveLength(0);
+      expect(afterRescan.patients[0]).toMatchObject({
+        id: "codex:skill:demo",
+        gate: "publishable"
+      });
     } finally {
       await reader.cancel();
       await closeServer(clinic.server);
@@ -97,9 +221,9 @@ function makeReport(score: number): SkillDoctorReport {
   };
 }
 
-function makeRepairReport(): SkillDoctorReport {
-  const finding = {
-    id: "finding-1",
+function makeRepairReport(inputs = [{ id: "finding-1", patientId: "codex:skill:demo", autofix: "review_required" as const }]): SkillDoctorReport {
+  const findings = inputs.map((input, index) => ({
+    id: input.id,
     rule_id: "REF_MISSING",
     severity: "high" as const,
     category: "reference",
@@ -108,29 +232,29 @@ function makeRepairReport(): SkillDoctorReport {
     evidence: "references/missing.md",
     message: "Skill 指令引用了不存在的内置资源。",
     suggestion: "创建被引用的文件，或将该路径改写为明确的示例路径。",
-    autofix: "review_required" as const,
+    autofix: input.autofix,
     deduction: 20,
-    patient_id: "codex:skill:demo"
-  };
+    patient_id: input.patientId
+  }));
 
   return {
     ...makeReport(49),
     summary: {
       ...makeReport(49).summary,
       patient_counts: {
-        skill: 1,
+        skill: findings.length,
         hook: 0,
         subagent: 0,
         config: 0,
         folder: 0
       }
     },
-    patients: [
+    patients: findings.map((finding, index) => (
       {
-        id: "codex:skill:demo",
+        id: finding.patient_id,
         type: "skill",
-        name: "demo-skill",
-        path: "/tmp/demo-skill",
+        name: `demo-skill-${index + 1}`,
+        path: `/tmp/demo-skill-${index + 1}`,
         runner: "codex",
         scope: "fixture",
         score: 49,
@@ -143,14 +267,48 @@ function makeRepairReport(): SkillDoctorReport {
             priority: "high",
             title: "补齐引用资源",
             suggestion: "创建 references/missing.md。",
-            autofix: "review_required",
+            autofix: finding.autofix,
             projected_gain: 20
           }
         ],
         projected_score: 72
       }
-    ],
-    findings: [finding]
+    )),
+    findings
+  };
+}
+
+function makeHealthyRepairReport(patientIds: string[]): SkillDoctorReport {
+  return {
+    ...makeReport(95),
+    summary: {
+      ...makeReport(95).summary,
+      patient_counts: {
+        skill: patientIds.length,
+        hook: 0,
+        subagent: 0,
+        config: 0,
+        folder: 0
+      },
+      blockers: 0,
+      warnings: 0
+    },
+    patients: patientIds.map((patientId, index) => ({
+      id: patientId,
+      type: "skill",
+      name: `demo-skill-${index + 1}`,
+      path: `/tmp/demo-skill-${index + 1}`,
+      runner: "codex",
+      scope: "fixture",
+      score: 95,
+      grade: "excellent",
+      gate: "publishable",
+      confidence: 0.95,
+      issues: [],
+      treatments: [],
+      projected_score: 95
+    })),
+    findings: []
   };
 }
 

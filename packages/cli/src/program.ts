@@ -7,6 +7,7 @@ import { installSkill, type InstallTarget } from "./install.js";
 import { fixtureHome } from "./paths.js";
 import { formatReport, readReport, writeReportFiles, type OutputFormat } from "./io.js";
 import { ReportStore } from "./live.js";
+import { RepairCoordinator } from "./repair.js";
 import { openBrowser, startClinicServer } from "./server.js";
 import { startClinicWatcher } from "./watch.js";
 
@@ -60,10 +61,17 @@ export function createProgram(env: ProgramEnv = {}): Command {
       const outDir = options.out ? String(options.out) : await mkdtemp(join(tmpdir(), "skill-doctor-clinic-"));
       await writeReportFiles(report, outDir);
       const store = new ReportStore(report);
-      const clinic = await startClinicServer(store, Number(options.port ?? 0));
+      const repairCoordinator = new RepairCoordinator({ store, scanOptions, outDir });
+      const clinic = await startClinicServer(store, Number(options.port ?? 0), { repairCoordinator });
       const watcher = options.watch === false
         ? undefined
-        : await startClinicWatcher({ scanOptions, outDir, store });
+        : await startClinicWatcher({
+          scanOptions,
+          outDir,
+          store,
+          shouldDeferScan: () => repairCoordinator.isRunning(),
+          onScanDeferred: () => repairCoordinator.markExternalChangePending()
+        });
       stdout.write(`Skill Doctor clinic: ${clinic.url}\nReport artifacts: ${outDir}\n`);
       stdout.write(`Live watch: ${watcher ? `enabled (${watcher.watchedPaths.length} roots)` : "disabled"}\n`);
       if (options.open !== false) await openBrowser(clinic.url);

@@ -46,12 +46,22 @@ type LiveState =
   | { state: "error"; message: string; updatedAt?: string; version?: number };
 
 type RepairState = {
-  status: "idle" | "running" | "complete" | "error";
+  status: "idle" | "running" | "rescanning" | "review" | "complete" | "error";
   progress: number;
   message: string;
   jobId?: string | undefined;
   updatedAt?: string | undefined;
   completedFindingIds?: string[] | undefined;
+  skippedFindingIds?: string[] | undefined;
+};
+
+type BatchRepairState = {
+  status: "idle" | "running" | "rescanning" | "complete" | "error";
+  jobId?: string | undefined;
+  total: number;
+  autoFixable: number;
+  manualRequired: number;
+  message: string;
 };
 
 type ClinicLivePayload =
@@ -137,16 +147,95 @@ type ClinicLivePayload =
       patient_name: string;
       progress: number;
       message: string;
+    }
+  | {
+      type: "repair:batch-start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      total: number;
+      auto_fixable: number;
+      manual_required: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      total_findings: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-applied";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      finding_id: string;
+      progress: number;
+      remaining: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-skipped";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      finding_id: string;
+      progress: number;
+      remaining: number;
+      reason: string;
+      message: string;
+    }
+  | {
+      type: "repair:rescan-start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      pending_external_change: boolean;
+      message: string;
+    }
+  | {
+      type: "repair:rescan-complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      report: SkillDoctorReport;
+      message: string;
+    }
+  | {
+      type: "repair:batch-complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      total: number;
+      auto_applied: number;
+      manual_required: number;
+      message: string;
     };
 
 type RepairPayload = Extract<ClinicLivePayload, {
-  type: "repair:start" | "repair:progress" | "repair:item-complete" | "repair:complete" | "repair:error";
+  type: `repair:${string}`;
 }>;
 
 export function App() {
   const [loadState, setLoadState] = useState<LoadState>({ state: "loading" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [repairStates, setRepairStates] = useState<Record<string, RepairState>>({});
+  const [batchRepairState, setBatchRepairState] = useState<BatchRepairState>({
+    status: "idle",
+    total: 0,
+    autoFixable: 0,
+    manualRequired: 0,
+    message: "暂无治疗任务"
+  });
   const [liveState, setLiveState] = useState<LiveState>({
     state: "connecting",
     message: "正在连接实时复诊"
@@ -166,7 +255,29 @@ export function App() {
         });
         setRepairStates((current) => {
           const activeIds = new Set(report.patients.map((patient) => patient.id));
-          return Object.fromEntries(Object.entries(current).filter(([patientId]) => activeIds.has(patientId)));
+          return Object.fromEntries(Object.entries(current)
+            .filter(([patientId]) => activeIds.has(patientId))
+            .map(([patientId, state]) => {
+              const patient = report.patients.find((candidate) => candidate.id === patientId);
+              if (!patient) return [patientId, state];
+              if (patient.issues.length === 0 && (state.status === "running" || state.status === "rescanning" || state.status === "review")) {
+                return [patientId, {
+                  ...state,
+                  status: "complete",
+                  progress: 100,
+                  message: "真实复诊通过，该对象已可发布。"
+                }];
+              }
+              if (patient.issues.length > 0 && (state.status === "running" || state.status === "rescanning")) {
+                return [patientId, {
+                  ...state,
+                  status: "review",
+                  progress: 100,
+                  message: "真实复诊后仍有发现项，需要人工确认。"
+                }];
+              }
+              return [patientId, state];
+            }));
         });
       });
     };
@@ -263,16 +374,21 @@ export function App() {
       const handleRepairEvent = (event: Event) => {
         const payload = parseLivePayload(event);
         if (!payload || !isRepairPayload(payload) || cancelled) return;
-        setRepairStates((current) => ({
-          ...current,
-          [payload.patient_id]: repairStateFromPayload(payload, current[payload.patient_id])
-        }));
+        setBatchRepairState((current) => batchStateFromPayload(payload, current));
+        setRepairStates((current) => repairStatesFromPayload(payload, current));
       };
       eventSource.addEventListener("repair:start", handleRepairEvent);
       eventSource.addEventListener("repair:progress", handleRepairEvent);
       eventSource.addEventListener("repair:item-complete", handleRepairEvent);
       eventSource.addEventListener("repair:complete", handleRepairEvent);
       eventSource.addEventListener("repair:error", handleRepairEvent);
+      eventSource.addEventListener("repair:batch-start", handleRepairEvent);
+      eventSource.addEventListener("repair:item-start", handleRepairEvent);
+      eventSource.addEventListener("repair:item-applied", handleRepairEvent);
+      eventSource.addEventListener("repair:item-skipped", handleRepairEvent);
+      eventSource.addEventListener("repair:rescan-start", handleRepairEvent);
+      eventSource.addEventListener("repair:rescan-complete", handleRepairEvent);
+      eventSource.addEventListener("repair:batch-complete", handleRepairEvent);
 
       eventSource.onerror = () => {
         if (cancelled) return;
@@ -315,7 +431,8 @@ export function App() {
         message: "治疗任务已提交，正在建立实时进度...",
         jobId: current[patient.id]?.jobId,
         updatedAt: new Date().toISOString(),
-        completedFindingIds: []
+        completedFindingIds: [],
+        skippedFindingIds: []
       }
     }));
 
@@ -336,7 +453,8 @@ export function App() {
           message: payload?.message ?? "治疗任务已创建",
           jobId: payload?.job_id,
           updatedAt: new Date().toISOString(),
-          completedFindingIds: current[patient.id]?.completedFindingIds ?? []
+          completedFindingIds: current[patient.id]?.completedFindingIds ?? [],
+          skippedFindingIds: current[patient.id]?.skippedFindingIds ?? []
         }
       }));
     } catch (error) {
@@ -348,17 +466,44 @@ export function App() {
           message: error instanceof Error ? error.message : "治疗请求失败",
           jobId: current[patient.id]?.jobId,
           updatedAt: new Date().toISOString(),
-          completedFindingIds: current[patient.id]?.completedFindingIds ?? []
+          completedFindingIds: current[patient.id]?.completedFindingIds ?? [],
+          skippedFindingIds: current[patient.id]?.skippedFindingIds ?? []
         }
       }));
     }
   };
 
-  const startAllRepairs = async (patients: Patient[]) => {
-    const targets = sortPatientsByUrgency(patients).filter((patient) => (
-      patient.issues.length > 0 && repairStates[patient.id]?.status !== "running"
-    ));
-    await Promise.all(targets.map((patient) => startRepair(patient)));
+  const startAllRepairs = async () => {
+    setBatchRepairState((current) => ({
+      ...current,
+      status: "running",
+      message: "一键治疗任务已提交"
+    }));
+    try {
+      const response = await fetch("/api/repairs/all", { method: "POST" });
+      const payload = await response.json().catch(() => null) as {
+        job_id?: string;
+        total?: number;
+        auto_fixable?: number;
+        manual_required?: number;
+        message?: string;
+      } | null;
+      if (!response.ok) throw new Error(payload?.message ?? `一键治疗请求失败：${response.status}`);
+      setBatchRepairState({
+        status: "running",
+        jobId: payload?.job_id,
+        total: payload?.total ?? 0,
+        autoFixable: payload?.auto_fixable ?? 0,
+        manualRequired: payload?.manual_required ?? 0,
+        message: "一键治疗任务已创建"
+      });
+    } catch (error) {
+      setBatchRepairState((current) => ({
+        ...current,
+        status: "error",
+        message: error instanceof Error ? error.message : "一键治疗请求失败"
+      }));
+    }
   };
 
   if (loadState.state === "loading") return <LoadingState />;
@@ -370,6 +515,7 @@ export function App() {
       report={loadState.report}
       liveState={liveState}
       repairStates={repairStates}
+      batchRepairState={batchRepairState}
       selectedPatient={selectedPatient}
       onSelectPatient={setSelectedId}
       onStartRepair={startRepair}
@@ -382,6 +528,7 @@ function Clinic({
   report,
   liveState,
   repairStates,
+  batchRepairState,
   selectedPatient,
   onSelectPatient,
   onStartRepair,
@@ -390,10 +537,11 @@ function Clinic({
   report: SkillDoctorReport;
   liveState: LiveState;
   repairStates: Record<string, RepairState>;
+  batchRepairState: BatchRepairState;
   selectedPatient: Patient | null;
   onSelectPatient: (id: string) => void;
   onStartRepair: (patient: Patient) => Promise<void>;
-  onStartAllRepairs: (patients: Patient[]) => Promise<void>;
+  onStartAllRepairs: () => Promise<void>;
 }) {
   const wards = useMemo(() => groupPatientsByWard(report), [report]);
   const projectedScore = useMemo(() => averageProjectedScore(report.patients), [report.patients]);
@@ -404,7 +552,11 @@ function Clinic({
   const projectedGain = Math.max(0, projectedScore - report.summary.score);
   const selectedRepairState = selectedPatient ? repairStates[selectedPatient.id] : undefined;
   const repairableCount = rankedPatients.filter((patient) => patient.issues.length > 0).length;
-  const runningRepairCount = rankedPatients.filter((patient) => repairStates[patient.id]?.status === "running").length;
+  const autoFixableCount = rankedPatients.reduce((sum, patient) => sum + patient.issues.filter((issue) => issue.autofix === "safe_autofix").length, 0);
+  const manualRequiredCount = rankedPatients.reduce((sum, patient) => sum + patient.issues.filter((issue) => issue.autofix !== "safe_autofix").length, 0);
+  const runningRepairCount = batchRepairState.status === "running" || batchRepairState.status === "rescanning"
+    ? batchRepairState.total
+    : rankedPatients.filter((patient) => repairStates[patient.id]?.status === "running" || repairStates[patient.id]?.status === "rescanning").length;
 
   return (
     <main className="clinic-shell">
@@ -422,9 +574,11 @@ function Clinic({
           <LivePill liveState={liveState} />
           <TreatAllButton
             count={repairableCount}
+            autoFixableCount={autoFixableCount}
+            manualRequiredCount={manualRequiredCount}
             runningCount={runningRepairCount}
             onClick={() => {
-              void onStartAllRepairs(rankedPatients);
+              void onStartAllRepairs();
             }}
           />
           <GatePill gate={report.summary.gate} />
@@ -527,31 +681,153 @@ function isRepairPayload(payload: ClinicLivePayload): payload is RepairPayload {
   return payload.type.startsWith("repair:");
 }
 
-function repairStateFromPayload(
-  payload: RepairPayload,
-  previous?: RepairState
-): RepairState {
-  const base = {
-    progress: clampScore(payload.progress),
-    message: payload.message,
-    jobId: payload.job_id,
-    updatedAt: payload.updated_at,
-    completedFindingIds: previous?.completedFindingIds ?? []
-  };
-
-  if (payload.type === "repair:item-complete") {
-    return {
-      ...base,
-      status: "running",
-      completedFindingIds: Array.from(new Set([...base.completedFindingIds, payload.finding_id]))
-    };
+function batchStateFromPayload(payload: RepairPayload, current: BatchRepairState): BatchRepairState {
+  switch (payload.type) {
+    case "repair:batch-start":
+      return {
+        status: "running",
+        jobId: payload.job_id,
+        total: payload.total,
+        autoFixable: payload.auto_fixable,
+        manualRequired: payload.manual_required,
+        message: payload.message
+      };
+    case "repair:rescan-start":
+      return {
+        ...current,
+        status: "rescanning",
+        jobId: payload.job_id,
+        message: payload.message
+      };
+    case "repair:batch-complete":
+      return {
+        status: "complete",
+        jobId: payload.job_id,
+        total: payload.total,
+        autoFixable: payload.auto_applied,
+        manualRequired: payload.manual_required,
+        message: payload.message
+      };
+    case "repair:error":
+      return {
+        ...current,
+        status: "error",
+        jobId: payload.job_id,
+        message: payload.message
+      };
+    default:
+      return current;
   }
-  if (payload.type === "repair:complete") return { ...base, status: "complete", progress: 100 };
-  if (payload.type === "repair:error") return { ...base, status: "error" };
+}
+
+function repairStatesFromPayload(
+  payload: RepairPayload,
+  current: Record<string, RepairState>
+): Record<string, RepairState> {
+  switch (payload.type) {
+    case "repair:item-start":
+      return {
+        ...current,
+        [payload.patient_id]: {
+          ...(current[payload.patient_id] ?? emptyRepairState()),
+          status: "running",
+          progress: clampScore(payload.progress),
+          message: payload.message,
+          jobId: payload.job_id,
+          updatedAt: payload.updated_at
+        }
+      };
+    case "repair:item-applied":
+    case "repair:item-complete":
+      return updateFindingRepairState(payload, current, "applied");
+    case "repair:item-skipped":
+      return updateFindingRepairState(payload, current, "skipped");
+    case "repair:rescan-start":
+      return Object.fromEntries(Object.entries(current).map(([patientId, state]) => [
+        patientId,
+        state.status === "running" || state.status === "review"
+          ? { ...state, status: "rescanning", progress: Math.max(state.progress, 96), message: payload.message, jobId: payload.job_id, updatedAt: payload.updated_at }
+          : state
+      ]));
+    case "repair:start":
+    case "repair:progress":
+      return {
+        ...current,
+        [payload.patient_id]: {
+          ...(current[payload.patient_id] ?? emptyRepairState()),
+          status: "running",
+          progress: clampScore(payload.progress),
+          message: payload.message,
+          jobId: payload.job_id,
+          updatedAt: payload.updated_at
+        }
+      };
+    case "repair:complete":
+      return {
+        ...current,
+        [payload.patient_id]: {
+          ...(current[payload.patient_id] ?? emptyRepairState()),
+          status: "rescanning",
+          progress: 96,
+          message: "治疗动作完成，等待真实复诊确认。",
+          jobId: payload.job_id,
+          updatedAt: payload.updated_at
+        }
+      };
+    case "repair:error":
+      return {
+        ...current,
+        [payload.patient_id]: {
+          ...(current[payload.patient_id] ?? emptyRepairState()),
+          status: "error",
+          progress: clampScore(payload.progress),
+          message: payload.message,
+          jobId: payload.job_id,
+          updatedAt: payload.updated_at
+        }
+      };
+    default:
+      return current;
+  }
+}
+
+function updateFindingRepairState(
+  payload: Extract<RepairPayload, { type: "repair:item-applied" | "repair:item-complete" | "repair:item-skipped" }>,
+  current: Record<string, RepairState>,
+  result: "applied" | "skipped"
+): Record<string, RepairState> {
+  const previous = current[payload.patient_id] ?? emptyRepairState();
+  const completedFindingIds = previous.completedFindingIds ?? [];
+  const skippedFindingIds = previous.skippedFindingIds ?? [];
+  const nextCompleted = result === "applied"
+    ? Array.from(new Set([...completedFindingIds, payload.finding_id]))
+    : completedFindingIds;
+  const nextSkipped = result === "skipped"
+    ? Array.from(new Set([...skippedFindingIds, payload.finding_id]))
+    : skippedFindingIds;
+
   return {
-    ...base,
-    status: "running",
-    progress: Math.max(previous?.progress ?? 0, base.progress)
+    ...current,
+    [payload.patient_id]: {
+      ...previous,
+      status: result === "skipped" ? "review" : "running",
+      progress: clampScore(payload.progress),
+      message: payload.message,
+      jobId: payload.job_id,
+      updatedAt: payload.updated_at,
+      completedFindingIds: nextCompleted,
+      skippedFindingIds: nextSkipped
+    }
+  };
+}
+
+function emptyRepairState(): RepairState {
+  return {
+    status: "idle",
+    progress: 0,
+    message: "等待治疗",
+    completedFindingIds: [],
+    skippedFindingIds: []
   };
 }
 
@@ -781,29 +1057,36 @@ function PatientTable({
           <span>走势</span>
           <span>门禁</span>
         </div>
-        {patients.map((patient) => (
-          <button
-            className={`patient-row tone-${scoreTone(patient.score)} ${selectedPatient?.id === patient.id ? "is-selected" : ""} ${repairStates[patient.id]?.status === "complete" ? "is-repair-complete" : ""}`}
-            key={patient.id}
-            type="button"
-            aria-pressed={selectedPatient?.id === patient.id}
-            onClick={() => onSelectPatient(patient.id)}
-            style={{ viewTransitionName: patientTransitionName(patient.id) }}
-          >
-            <span className="patient-identity">
-              <span className="patient-avatar" aria-hidden="true">{avatarFor(patient.type)}</span>
-              <span>
-                <strong>{patient.name}</strong>
-                <small>{displayPatientType(patient.type)}</small>
+        {patients.map((patient) => {
+          const repairStatus = repairStates[patient.id]?.status;
+          const isRepairActive = repairStatus === "running" || repairStatus === "rescanning";
+          const isReview = repairStatus === "review";
+          const isReportClear = patient.gate === "publishable" && patient.issues.length === 0;
+
+          return (
+            <button
+              className={`patient-row tone-${scoreTone(patient.score)} ${selectedPatient?.id === patient.id ? "is-selected" : ""} ${isReportClear ? "is-repair-complete" : ""} ${isRepairActive ? "is-repair-active" : ""} ${isReview ? "is-repair-review" : ""}`}
+              key={patient.id}
+              type="button"
+              aria-pressed={selectedPatient?.id === patient.id}
+              onClick={() => onSelectPatient(patient.id)}
+              style={{ viewTransitionName: patientTransitionName(patient.id) }}
+            >
+              <span className="patient-identity">
+                <span className="patient-avatar" aria-hidden="true">{avatarFor(patient.type)}</span>
+                <span>
+                  <strong>{patient.name}</strong>
+                  <small>{displayPatientType(patient.type)}</small>
+                </span>
               </span>
-            </span>
-            <span className="runner-pill">{displayRunner(patient.runner)}</span>
-            <span className="score-number">{patient.score}</span>
-            <span className="score-number projected">{patient.projected_score}</span>
-            <MiniSparkline value={patient.score} projected={patient.projected_score} />
-            <span className={`status-pill gate-${patient.gate}`}>{displayGate(patient.gate)}</span>
-          </button>
-        ))}
+              <span className="runner-pill">{displayRunner(patient.runner)}</span>
+              <span className="score-number">{patient.score}</span>
+              <span className="score-number projected">{patient.projected_score}</span>
+              <MiniSparkline value={patient.score} projected={patient.projected_score} />
+              <span className={`status-pill gate-${patient.gate}`}>{displayGate(patient.gate)}</span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
@@ -830,6 +1113,7 @@ function PatientPanel({
   }
 
   const completedFindingIds = new Set(repairState?.completedFindingIds ?? []);
+  const skippedFindingIds = new Set(repairState?.skippedFindingIds ?? []);
 
   return (
     <aside className="patient-panel panel-card" aria-label={`${patient.name} 诊疗详情`}>
@@ -856,17 +1140,20 @@ function PatientPanel({
         {patient.issues.length === 0 ? (
           <p className="quiet">无需治疗。</p>
         ) : (
-          patient.issues.map((issue) => (
-            <article className={`finding severity-${issue.severity} ${completedFindingIds.has(issue.id) ? "is-resolved" : ""}`} key={issue.id}>
+          patient.issues.map((issue) => {
+            const isSkipped = skippedFindingIds.has(issue.id);
+            return (
+            <article className={`finding severity-${issue.severity} ${completedFindingIds.has(issue.id) ? "is-resolved" : ""} ${isSkipped ? "is-skipped" : ""}`} key={issue.id}>
               <div className="finding-head">
                 <strong>{issue.rule_id}</strong>
-                <span>{displaySeverity(issue.severity)}</span>
+                <span>{isSkipped ? "需确认" : displaySeverity(issue.severity)}</span>
               </div>
               <p>{issue.message}</p>
               <small>{issue.file}{issue.span ? `:${issue.span.line}` : ""} / {issue.evidence}</small>
               <p className="suggestion">{issue.suggestion}</p>
             </article>
-          ))
+            );
+          })
         )}
       </div>
     </aside>
@@ -888,16 +1175,25 @@ function RepairControls({
     message: patient.issues.length === 0 ? "当前对象无需治疗。" : repairReadiness(patient)
   };
   const hasIssues = patient.issues.length > 0;
-  const isRunning = repairState.status === "running";
-  const isComplete = repairState.status === "complete";
-  const actionLabel = isComplete ? "再次治疗" : isRunning ? "治疗中" : "开始治疗";
+  const isRunning = repairState.status === "running" || repairState.status === "rescanning";
+  const isComplete = repairState.status === "complete" && patient.issues.length === 0;
+  const isReview = repairState.status === "review";
+  const actionLabel = isComplete
+    ? "再次检查"
+    : repairState.status === "rescanning"
+      ? "复诊中"
+      : repairState.status === "running"
+        ? "治疗中"
+        : isReview
+          ? "再次治疗"
+          : "开始治疗";
 
   return (
     <section className={`repair-card repair-${repairState.status}`} aria-label="治疗控制" aria-live="polite">
       <div className="repair-head">
         <div>
           <p>治疗控制</p>
-          <h3>{hasIssues ? "可启动实时治疗流程" : "状态健康"}</h3>
+          <h3>{hasIssues ? isReview ? "需要人工确认" : "可启动真实治疗流程" : "状态健康"}</h3>
         </div>
         <span className={`repair-badge repair-${repairState.status}`}>
           {isComplete ? <CheckCircle2 aria-hidden="true" size={15} /> : <Sparkles aria-hidden="true" size={15} />}
@@ -912,7 +1208,8 @@ function RepairControls({
         <span style={{ width: `${clampScore(repairState.progress)}%` }} />
       </div>
       <p className="repair-message">{repairState.message}</p>
-      {isComplete ? <p className="repair-done">治疗完成。该对象已进入可发布状态，并会在清单中自然后移。</p> : null}
+      {isComplete ? <p className="repair-done">真实复诊通过。该对象已进入可发布状态，并会在清单中自然后移。</p> : null}
+      {isReview ? <p className="repair-review-note">复诊后仍有发现项，未被自动消除的问题已进入人工确认队列。</p> : null}
       <button
         className="repair-button"
         type="button"
@@ -963,10 +1260,14 @@ function MiniSparkline({ value, projected }: { value: number; projected: number 
 
 function TreatAllButton({
   count,
+  autoFixableCount,
+  manualRequiredCount,
   runningCount,
   onClick
 }: {
   count: number;
+  autoFixableCount: number;
+  manualRequiredCount: number;
   runningCount: number;
   onClick: () => void;
 }) {
@@ -977,7 +1278,9 @@ function TreatAllButton({
     <button className={`treat-all-button ${runningCount > 0 ? "is-running" : ""}`} type="button" disabled={disabled} onClick={onClick}>
       {runningCount > 0 ? <RefreshCw aria-hidden="true" size={16} /> : <Sparkles aria-hidden="true" size={16} />}
       <span>{label}</span>
-      {count > 0 ? <strong>{count}</strong> : null}
+      {runningCount > 0 ? <strong>{runningCount}</strong> : null}
+      {runningCount === 0 && autoFixableCount > 0 ? <strong>{autoFixableCount} 可自动</strong> : null}
+      {runningCount === 0 && manualRequiredCount > 0 ? <strong className="manual-count">{manualRequiredCount} 需确认</strong> : null}
     </button>
   );
 }
@@ -996,6 +1299,10 @@ function repairStatusLabel(status: RepairState["status"]): string {
       return "待治疗";
     case "running":
       return "治疗中";
+    case "rescanning":
+      return "待复诊";
+    case "review":
+      return "需确认";
     case "complete":
       return "已完成";
     case "error":
