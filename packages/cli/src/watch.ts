@@ -18,6 +18,8 @@ export interface ClinicWatcherOptions {
   store: ReportStore;
   debounceMs?: number;
   watchRoots?: string[];
+  shouldDeferScan?: () => boolean;
+  onScanDeferred?: (reason?: string) => void;
 }
 
 export interface RescanScheduler {
@@ -32,6 +34,8 @@ interface RescanSchedulerOptions {
   debounceMs?: number;
   scanFn?: (options: ScanOptions) => Promise<SkillDoctorReport>;
   writeReportFilesFn?: (report: SkillDoctorReport, outDir: string) => Promise<void>;
+  shouldDeferScan?: () => boolean;
+  onScanDeferred?: (reason?: string) => void;
 }
 
 export async function startClinicWatcher(options: ClinicWatcherOptions): Promise<ClinicWatcher> {
@@ -62,8 +66,12 @@ export function createRescanScheduler(options: RescanSchedulerOptions): RescanSc
   let queued = false;
   let closed = false;
 
-  const run = async () => {
+  const run = async (reason?: string) => {
     if (closed) return;
+    if (options.shouldDeferScan?.()) {
+      options.onScanDeferred?.(reason);
+      return;
+    }
     if (running) {
       queued = true;
       return;
@@ -87,17 +95,17 @@ export function createRescanScheduler(options: RescanSchedulerOptions): RescanSc
     }
   };
 
-  const schedule = () => {
+  const schedule = (reason?: string) => {
     if (closed) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = undefined;
-      void run();
+      void run(reason);
     }, debounceMs);
   };
 
   return {
-    trigger: () => schedule(),
+    trigger: (reason?: string) => schedule(reason),
     close: () => {
       closed = true;
       if (timer) clearTimeout(timer);

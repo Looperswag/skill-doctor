@@ -33,6 +33,47 @@ describe("createRescanScheduler", () => {
       scheduler.close();
     }
   });
+
+  test("defers watcher rescans while repair is running", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "skill-doctor-watch-"));
+    const store = new ReportStore(makeReport(42));
+    let scanCount = 0;
+    let deferredCount = 0;
+    let repairRunning = true;
+    const scheduler = createRescanScheduler({
+      scanOptions: {},
+      outDir,
+      store,
+      debounceMs: 1,
+      shouldDeferScan: () => repairRunning,
+      onScanDeferred: () => {
+        deferredCount += 1;
+      },
+      scanFn: async () => {
+        scanCount += 1;
+        return makeReport(92);
+      },
+      writeReportFilesFn: async () => undefined
+    });
+
+    try {
+      scheduler.trigger("治疗期间变更");
+      await delay(20);
+
+      expect(scanCount).toBe(0);
+      expect(deferredCount).toBe(1);
+
+      repairRunning = false;
+      const complete = waitForEvent(store, "scan:complete");
+      scheduler.trigger("治疗结束复诊");
+      await complete;
+
+      expect(scanCount).toBe(1);
+      expect(store.getReport().summary.score).toBe(92);
+    } finally {
+      scheduler.close();
+    }
+  });
 });
 
 describe("resolveWatchRoots", () => {
@@ -83,4 +124,8 @@ function makeReport(score: number): SkillDoctorReport {
     patients: [],
     findings: []
   };
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }

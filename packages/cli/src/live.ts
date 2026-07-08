@@ -85,6 +85,78 @@ export type ClinicEvent =
       patient_name: string;
       progress: number;
       message: string;
+    }
+  | {
+      type: "repair:batch-start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      total: number;
+      auto_fixable: number;
+      manual_required: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      total_findings: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-applied";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      finding_id: string;
+      progress: number;
+      remaining: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-skipped";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      finding_id: string;
+      progress: number;
+      remaining: number;
+      reason: string;
+      message: string;
+    }
+  | {
+      type: "repair:rescan-start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      pending_external_change: boolean;
+      message: string;
+    }
+  | {
+      type: "repair:rescan-complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      report: SkillDoctorReport;
+      message: string;
+    }
+  | {
+      type: "repair:batch-complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      total: number;
+      auto_applied: number;
+      manual_required: number;
+      message: string;
     };
 
 export type ClinicSnapshot = Extract<ClinicEvent, { type: "snapshot" }>;
@@ -291,6 +363,150 @@ export class ReportStore {
       patient_id: input.patientId,
       patient_name: input.patientName,
       progress: input.progress,
+      message: input.message
+    });
+  }
+
+  beginRepairBatch(input: {
+    jobId: string;
+    total: number;
+    autoFixable: number;
+    manualRequired: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:batch-start",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      total: input.total,
+      auto_fixable: input.autoFixable,
+      manual_required: input.manualRequired,
+      message: input.message
+    });
+  }
+
+  startRepairItem(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    progress: number;
+    totalFindings: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:item-start",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      progress: input.progress,
+      total_findings: input.totalFindings,
+      message: input.message
+    });
+  }
+
+  applyRepairItem(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    findingId: string;
+    progress: number;
+    remaining: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:item-applied",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      finding_id: input.findingId,
+      progress: input.progress,
+      remaining: input.remaining,
+      message: input.message
+    });
+  }
+
+  skipRepairItem(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    findingId: string;
+    progress: number;
+    remaining: number;
+    reason: string;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:item-skipped",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      finding_id: input.findingId,
+      progress: input.progress,
+      remaining: input.remaining,
+      reason: input.reason,
+      message: input.message
+    });
+  }
+
+  beginRepairRescan(input: {
+    jobId: string;
+    pendingExternalChange: boolean;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:rescan-start",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      pending_external_change: input.pendingExternalChange,
+      message: input.message
+    });
+  }
+
+  completeRepairRescan(input: {
+    jobId: string;
+    report: SkillDoctorReport;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:rescan-complete",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      report: input.report,
+      message: input.message
+    });
+  }
+
+  completeRepairBatch(input: {
+    jobId: string;
+    total: number;
+    autoApplied: number;
+    manualRequired: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:batch-complete",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      total: input.total,
+      auto_applied: input.autoApplied,
+      manual_required: input.manualRequired,
       message: input.message
     });
   }

@@ -238,6 +238,11 @@ a {
   font-size: 12px;
 }
 
+.treat-all-button strong.manual-count {
+  background: rgba(255, 255, 255, 0.34);
+  color: #fff7df;
+}
+
 .treat-all-button:hover,
 .treat-all-button:focus-visible {
   background: var(--blue-deep);
@@ -253,6 +258,11 @@ a {
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
+}
+
+.treat-all-button:disabled strong {
+  background: rgba(104, 113, 125, 0.12);
+  color: var(--muted);
 }
 
 .treat-all-button.is-running svg {
@@ -861,6 +871,17 @@ button.patient-row {
   animation: patient-healed-slide 900ms ease both;
 }
 
+.patient-row.is-repair-active {
+  border-color: rgba(19, 168, 229, 0.42);
+  background: linear-gradient(180deg, #ffffff, #f3fbff);
+  box-shadow: 0 14px 28px rgba(19, 168, 229, 0.1);
+}
+
+.patient-row.is-repair-review {
+  border-color: rgba(230, 158, 31, 0.48);
+  background: linear-gradient(180deg, #ffffff, #fff9ed);
+}
+
 .patient-row-head {
   min-height: auto;
   margin-top: 0;
@@ -1116,6 +1137,16 @@ button.patient-row {
   color: var(--blue-deep);
 }
 
+.repair-badge.repair-rescanning {
+  border-color: rgba(19, 168, 229, 0.35);
+  color: var(--blue-deep);
+}
+
+.repair-badge.repair-review {
+  border-color: rgba(230, 158, 31, 0.35);
+  color: #c47a0a;
+}
+
 .repair-badge.repair-complete {
   border-color: rgba(34, 160, 107, 0.35);
   color: var(--green);
@@ -1158,12 +1189,17 @@ button.patient-row {
   background: linear-gradient(90deg, var(--green), #70c287);
 }
 
+.repair-review .repair-meter span {
+  background: linear-gradient(90deg, var(--amber), #f0b945);
+}
+
 .repair-error .repair-meter span {
   background: linear-gradient(90deg, var(--red), #f17b6f);
 }
 
 .repair-message,
-.repair-done {
+.repair-done,
+.repair-review-note {
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
@@ -1179,6 +1215,15 @@ button.patient-row {
   border-radius: 10px;
   background: rgba(34, 160, 107, 0.08);
   color: #176947;
+  font-weight: 800;
+}
+
+.repair-review-note {
+  padding: 9px 10px;
+  border: 1px solid rgba(230, 158, 31, 0.24);
+  border-radius: 10px;
+  background: rgba(230, 158, 31, 0.08);
+  color: #8a570d;
   font-weight: 800;
 }
 
@@ -1209,7 +1254,8 @@ button.patient-row {
   transform: none;
 }
 
-.repair-running .repair-button svg {
+.repair-running .repair-button svg,
+.repair-rescanning .repair-button svg {
   animation: live-spin 1100ms linear infinite;
 }
 
@@ -1246,6 +1292,13 @@ button.patient-row {
 
 .finding.is-resolved {
   animation: finding-resolved 640ms ease forwards;
+}
+
+.finding.is-skipped {
+  --severity-color: var(--amber);
+  border-color: rgba(230, 158, 31, 0.24);
+  border-left-color: var(--amber);
+  background: linear-gradient(180deg, #ffffff, #fff9ed);
 }
 
 .finding-head {
