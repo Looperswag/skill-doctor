@@ -6,15 +6,21 @@
 
 `skill-doctor` 是一个面向 Agent 能力工程的本地诊疗台。它会扫描用户本机的 `.codex`、`.claude`、`.agents` 目录，把每个 skill、hook、subagent、config 或文件夹拟人化成一个“病人”，根据结构、安全、可迁移性和上下文污染风险打分，并用浅色仪表盘展示血条、病因、治疗队列、预计恢复分和导出报告。
 
-最短路径（npm 包发布后）：
+当前可用的一行体验：
 
 ```bash
-npx @looperswag/skill-doctor@latest clinic --home
+npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home
 ```
 
-npm 包名是 `@looperswag/skill-doctor`，安装后暴露的 CLI 命令仍然是 `skill-doctor`。
+这会从 GitHub Release 下载 npm tarball，并启动本地诊疗台。显式指定 `--registry=https://registry.npmjs.org/` 是为了绕开部分本机 npm 镜像对 scoped 包或新包的同步延迟。
 
-在 npm 发布前，可以直接从源码仓库体验：
+npm 包名预留为 `@looperswag/skill-doctor`，发布后也可以运行：
+
+```bash
+npx --registry=https://registry.npmjs.org/ @looperswag/skill-doctor@latest clinic --home
+```
+
+如果你想从源码仓库体验：
 
 ```bash
 git clone https://github.com/Looperswag/skill-doctor.git
@@ -94,10 +100,10 @@ V1 默认只读扫描。`fix` 只支持 dry-run。唯一会写用户目录的命
 
 ## 快速开始
 
-### 方式一：扫描本机 Agent 配置（npm 包发布后）
+### 方式一：扫描本机 Agent 配置
 
 ```bash
-npx @looperswag/skill-doctor@latest clinic --home
+npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home
 ```
 
 这条命令会：
@@ -110,20 +116,20 @@ npx @looperswag/skill-doctor@latest clinic --home
 关闭实时监听：
 
 ```bash
-npx @looperswag/skill-doctor@latest clinic --home --no-watch
+npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home --no-watch
 ```
 
 ### 方式二：只生成报告
 
 ```bash
-npx @looperswag/skill-doctor@latest scan --home --format markdown
-npx @looperswag/skill-doctor@latest scan ./my-skill --format json --out reports/latest
+npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz scan --home --format markdown
+npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz scan ./my-skill --format json --out reports/latest
 ```
 
 ### 方式三：把 Skill Doctor 安装成 Agent skill
 
 ```bash
-npx @looperswag/skill-doctor@latest install-skill --target both
+npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz install-skill --target both
 ```
 
 默认安装位置：

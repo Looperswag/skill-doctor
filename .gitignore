@@ -11,3 +11,4 @@ reports/
 .worktrees/
 *.log
 *.tsbuildinfo
+*.tgz
