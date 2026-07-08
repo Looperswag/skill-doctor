@@ -17,10 +17,16 @@ import {
 } from "lucide-react";
 import {
   averageProjectedScore,
+  buildMarkdownSummary,
   buildRecoverySeries,
+  displayGate,
+  displayPatientType,
+  displayRunner,
+  displaySeverity,
   groupPatientsByWard,
   scoreTone,
   severityBreakdown,
+  severityRows,
   summarizeFindingCount
 } from "./report-model.js";
 import type { RecoveryPoint, SeverityBreakdown, Tone, Ward } from "./report-model.js";
@@ -103,7 +109,7 @@ function Clinic({
             <span>/100</span>
           </div>
           <div className="export-cluster" aria-label="报告导出">
-            <ExportButton icon={<FileText size={16} />} label="摘要" onClick={() => downloadText("skill-doctor-summary.md", markdownSummary(report))} />
+            <ExportButton icon={<FileText size={16} />} label="摘要" onClick={() => downloadText("skill-doctor-summary.md", buildMarkdownSummary(report))} />
             <ExportButton icon={<FileJson size={16} />} label="JSON" onClick={() => downloadText("skill-doctor-report.json", JSON.stringify(report, null, 2))} />
             <ExportButton icon={<Download size={16} />} label="发现项" onClick={() => downloadText("skill-doctor-findings.jsonl", report.findings.map((finding) => JSON.stringify(finding)).join("\n"))} />
             <ExportButton icon={<ImageDown size={16} />} label="PNG" onClick={() => downloadPng(report)} />
@@ -247,14 +253,29 @@ function RecoveryChart({ points }: { points: RecoveryPoint[] }) {
     );
   }
 
+  const currentLine = recoveryPolyline(points, "score");
+  const projectedLine = recoveryPolyline(points, "projectedScore");
+
   return (
     <section className="chart-card panel-card" aria-label="恢复走势">
       <ChartHeading icon={<BarChart3 size={18} />} title="恢复走势" caption="当前分与预计恢复分对比" />
+      <div className="chart-legend" aria-hidden="true">
+        <span className="legend-current">当前分</span>
+        <span className="legend-projected">预计恢复</span>
+      </div>
       <div className="recovery-chart" role="img" aria-label="病人当前健康分与预计恢复分阶梯图">
         <div className="chart-grid-lines" aria-hidden="true" />
+        <svg className="recovery-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <polyline className="line-projected" points={projectedLine} vectorEffect="non-scaling-stroke" />
+          <polyline className="line-current" points={currentLine} vectorEffect="non-scaling-stroke" />
+        </svg>
         {points.map((point) => (
           <div className="recovery-column" key={point.id}>
             <div className="column-track">
+              <span className="score-tags" aria-hidden="true">
+                <span className="score-tag current">{point.score}</span>
+                <span className="score-tag projected">{point.projectedScore}</span>
+              </span>
               <span
                 className="column-projected"
                 style={{ height: `${clampScore(point.projectedScore)}%` }}
@@ -522,77 +543,13 @@ function avatarFor(type: Patient["type"]): string {
   }
 }
 
-function displayPatientType(type: Patient["type"]): string {
-  switch (type) {
-    case "skill":
-      return "技能";
-    case "hook":
-      return "Hook";
-    case "subagent":
-      return "子代理";
-    case "config":
-      return "配置";
-    case "folder":
-      return "文件夹";
-  }
-}
-
-function displayRunner(runner: Patient["runner"]): string {
-  switch (runner) {
-    case "codex":
-      return "Codex";
-    case "claude":
-      return "Claude";
-    case "generic":
-      return "通用";
-  }
-}
-
-function displayGate(gate: SkillDoctorReport["summary"]["gate"]): string {
-  switch (gate) {
-    case "publishable":
-      return "可发布";
-    case "warning":
-      return "警告";
-    case "blocked":
-      return "阻断";
-    case "unknown":
-      return "未知";
-  }
-}
-
-function displaySeverity(severity: Severity): string {
-  switch (severity) {
-    case "critical":
-      return "严重";
-    case "high":
-      return "高";
-    case "medium":
-      return "中";
-    case "low":
-      return "低";
-    case "info":
-      return "信息";
-  }
-}
-
-function severityRows(breakdown: SeverityBreakdown): Array<{ severity: Severity; label: string; count: number }> {
-  return [
-    { severity: "critical", label: "严重", count: breakdown.critical },
-    { severity: "high", label: "高", count: breakdown.high },
-    { severity: "medium", label: "中", count: breakdown.medium },
-    { severity: "low", label: "低", count: breakdown.low },
-    { severity: "info", label: "信息", count: breakdown.info }
-  ];
-}
-
 function donutGradient(breakdown: SeverityBreakdown): string {
   const colors: Record<Severity, string> = {
-    critical: "var(--danger)",
-    high: "var(--red)",
-    medium: "var(--amber)",
-    low: "var(--blue)",
-    info: "var(--muted)"
+    critical: "var(--severity-critical)",
+    high: "var(--severity-high)",
+    medium: "var(--severity-medium)",
+    low: "var(--severity-low)",
+    info: "var(--severity-info)"
   };
   let cursor = 0;
   const segments = severityRows(breakdown)
@@ -614,18 +571,6 @@ function downloadText(filename: string, text: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
-}
-
-function markdownSummary(report: SkillDoctorReport): string {
-  return [
-    "# Skill Doctor 治疗报告",
-    "",
-    `健康分：${report.summary.score} / 100`,
-    `门禁：${displayGate(report.summary.gate)}`,
-    `置信度：${report.summary.confidence}`,
-    "",
-    ...report.patients.map((patient) => `- ${patient.name}: ${patient.score}/100（${displayGate(patient.gate)}）`)
-  ].join("\n");
 }
 
 function downloadPng(report: SkillDoctorReport) {
@@ -683,6 +628,14 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: n
 
 function clampScore(score: number): number {
   return Math.max(0, Math.min(100, score));
+}
+
+function recoveryPolyline(points: RecoveryPoint[], key: "score" | "projectedScore"): string {
+  return points.map((point, index) => {
+    const x = (index + 0.5) / points.length * 100;
+    const y = 96 - clampScore(point[key]) * 0.88;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
 }
 
 function shortLabel(label: string): string {

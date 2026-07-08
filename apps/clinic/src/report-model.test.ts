@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   averageProjectedScore,
+  buildMarkdownSummary,
   buildRecoverySeries,
   groupPatientsByWard,
   scoreTone,
@@ -113,5 +114,58 @@ describe("report-model", () => {
       info: 0,
       total: 3
     });
+  });
+
+  test("exports a complete markdown treatment report", () => {
+    const finding = {
+      id: "finding-1",
+      rule_id: "REF_MISSING",
+      severity: "high" as const,
+      category: "reference",
+      file: "SKILL.md",
+      span: { line: 6, column: 1 },
+      evidence: "references/missing.md",
+      message: "Skill 指令引用了不存在的内置资源。",
+      suggestion: "创建被引用的文件，或将该路径改写为明确的示例路径。",
+      autofix: "manual",
+      deduction: 20,
+      patient_id: "codex:skill:demo"
+    };
+    const reportWithFindings: SkillDoctorReport = {
+      ...report,
+      findings: [finding],
+      patients: [
+        {
+          ...report.patients[0]!,
+          issues: [finding],
+          treatments: [
+            {
+              priority: "high",
+              title: "补齐引用资源",
+              suggestion: "创建 references/missing.md。",
+              autofix: "manual",
+              projected_gain: 20
+            }
+          ]
+        }
+      ]
+    };
+
+    const markdown = buildMarkdownSummary(reportWithFindings);
+
+    expect(markdown).toContain("# Skill Doctor 治疗报告");
+    expect(markdown).toContain("## 面板总览");
+    expect(markdown).toContain("当前健康分：62 / 100");
+    expect(markdown).toContain("预计恢复分：68 / 100");
+    expect(markdown).toContain("## 病区评测");
+    expect(markdown).toContain("Codex 病区");
+    expect(markdown).toContain("## 病人明细");
+    expect(markdown).toContain("demo-skill");
+    expect(markdown).toContain("/tmp/demo");
+    expect(markdown).toContain("REF_MISSING");
+    expect(markdown).toContain("SKILL.md:6");
+    expect(markdown).toContain("references/missing.md");
+    expect(markdown).toContain("创建被引用的文件");
+    expect(markdown).toContain("补齐引用资源");
   });
 });
