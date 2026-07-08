@@ -1,0 +1,23 @@
+{
+  "name": "skill-doctor-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @skill-doctor/core && npm run build -w skill-doctor && npm run build -w @skill-doctor/clinic",
+    "test": "vitest run",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "npm run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8"
+  }
+}

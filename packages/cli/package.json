@@ -1,0 +1,29 @@
+{
+  "name": "skill-doctor",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Agent skill, hook, and subagent clinic with a bundled pixel treatment dashboard.",
+  "bin": {
+    "skill-doctor": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "templates",
+    "fixtures",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run src"
+  },
+  "dependencies": {
+    "@skill-doctor/core": "0.1.0",
+    "commander": "^12.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}
