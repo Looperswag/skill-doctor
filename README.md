@@ -4,23 +4,11 @@
 
 ![Skill Doctor 诊疗台](docs/assets/clinic-dashboard.png)
 
-`skill-doctor` 是一个面向 Agent 能力工程的本地诊疗台。它会扫描用户本机的 `.codex`、`.claude`、`.agents` 目录，把每个 skill、hook、subagent、config 或文件夹拟人化成一个“病人”，根据结构、安全、可迁移性和上下文污染风险打分，并用浅色仪表盘展示血条、病因、治疗队列、预计恢复分和导出报告。
+`skill-doctor` 是一个面向 Agent 能力工程的本地诊疗台：扫描 `.codex`、`.claude`、`.agents`，把每个 skill、hook、subagent 或配置当成“病人”，用血条、病区、治疗队列和报告解释哪里坏、为什么坏、先修哪里。
 
-当前可用的一行体验：
+## 先跑起来
 
-```bash
-npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home
-```
-
-这会从 GitHub Release 下载 npm tarball，并启动本地诊疗台。显式指定 `--registry=https://registry.npmjs.org/` 是为了绕开部分本机 npm 镜像对 scoped 包或新包的同步延迟。
-
-npm 包名预留为 `@looperswag/skill-doctor`，发布后也可以运行：
-
-```bash
-npx --registry=https://registry.npmjs.org/ @looperswag/skill-doctor@latest clinic --home
-```
-
-如果你想从源码仓库体验：
+### 1. 先看一个 demo
 
 ```bash
 git clone https://github.com/Looperswag/skill-doctor.git
@@ -30,7 +18,36 @@ npm run build
 node packages/cli/dist/index.js clinic --fixture demo --no-open --port 5201
 ```
 
-打开 `http://127.0.0.1:5201`，你会看到一个故意“生病”的 demo skill。修复文件后，诊疗台会实时复诊，分数、病人详情和治疗报告会自动刷新。
+打开 `http://127.0.0.1:5201`，你会看到一个故意“生病”的 demo skill。修改 demo 文件后，诊疗台会实时复诊，分数、病人详情和治疗报告会自动刷新。
+
+### 2. 扫描你的本机 Agent 配置
+
+```bash
+node packages/cli/dist/index.js clinic --home
+```
+
+这会扫描本机 Codex / Claude Code 目录，生成报告，启动诊疗台，并打开浏览器。
+
+### 常用命令
+
+```bash
+# 只生成 Markdown 报告
+node packages/cli/dist/index.js scan --home --format markdown
+
+# 安装为 Codex / Claude 可发现的 skill
+node packages/cli/dist/index.js install-skill --target both
+```
+
+<details>
+<summary>不想 clone？也可以用 GitHub Release 一行运行</summary>
+
+```bash
+npx --yes --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home
+```
+
+显式指定 `registry.npmjs.org` 是为了绕开部分公司或本机 npm 镜像的同步延迟。未来 npm 包发布后，也可以把 tarball 地址替换为 `@looperswag/skill-doctor@latest`。
+
+</details>
 
 ## 它解决什么问题
 
@@ -98,9 +115,7 @@ Skill Doctor 不只把文件当静态文本，而是先建立 inventory：
 
 V1 默认只读扫描。`fix` 只支持 dry-run。唯一会写用户目录的命令是 `install-skill`，并且会在旧版本存在时备份，不会静默覆盖。
 
-## 快速开始
-
-### 方式一：扫描本机 Agent 配置
+## 本地运用
 
 ```bash
 npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home
@@ -119,14 +134,14 @@ npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-d
 npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz clinic --home --no-watch
 ```
 
-### 方式二：只生成报告
+只生成报告：
 
 ```bash
 npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz scan --home --format markdown
 npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz scan ./my-skill --format json --out reports/latest
 ```
 
-### 方式三：把 Skill Doctor 安装成 Agent skill
+安装成 Agent skill：
 
 ```bash
 npx --registry=https://registry.npmjs.org/ https://github.com/Looperswag/skill-doctor/releases/download/v0.1.0/looperswag-skill-doctor-0.1.0.tgz install-skill --target both
