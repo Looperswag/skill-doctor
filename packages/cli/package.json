@@ -1,5 +1,5 @@
 {
-  "name": "skill-doctor",
+  "name": "@looperswag/skill-doctor",
   "version": "0.1.0",
   "type": "module",
   "description": "Agent skill, hook, and subagent clinic with a bundled pixel treatment dashboard.",

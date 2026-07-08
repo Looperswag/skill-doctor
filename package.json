@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @skill-doctor/core && npm run build -w skill-doctor && npm run build -w @skill-doctor/clinic",
+    "build": "npm run build -w @skill-doctor/core && npm run build -w @looperswag/skill-doctor && npm run build -w @skill-doctor/clinic",
     "test": "vitest run",
     "typecheck": "tsc -b --pretty false",
     "lint": "npm run typecheck"

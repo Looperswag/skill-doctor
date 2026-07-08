@@ -1,100 +1,129 @@
-# skill-doctor
+# Skill Doctor
 
-`skill-doctor` 是一套 Agent 能力包体检系统：扫描 Codex 和 Claude Code 的 skills、hooks、subagents 与配置，把每个能力文件夹拟人化成“病人”，在像素诊疗台里展示血条、病因、治疗建议和最终报告。
+把 Codex、Claude Code 等智能体的 skills、hooks、subagents 和配置当成“能力包”来体检、评测、复诊和生成报告。
+
+![Skill Doctor 诊疗台](docs/assets/clinic-dashboard.png)
+
+`skill-doctor` 是一个面向 Agent 能力工程的本地诊疗台。它会扫描用户本机的 `.codex`、`.claude`、`.agents` 目录，把每个 skill、hook、subagent、config 或文件夹拟人化成一个“病人”，根据结构、安全、可迁移性和上下文污染风险打分，并用浅色仪表盘展示血条、病因、治疗队列、预计恢复分和导出报告。
+
+最短路径（npm 包发布后）：
 
 ```bash
-npx skill-doctor@latest clinic --home
+npx @looperswag/skill-doctor@latest clinic --home
 ```
 
-这条命令会扫描本地 `.codex`、`.claude`、`.agents` 定制目录，生成报告，启动 localhost 诊疗台，并打开内置前端。用户不需要单独安装前端，也不需要手动 build。
+npm 包名是 `@looperswag/skill-doctor`，安装后暴露的 CLI 命令仍然是 `skill-doctor`。
 
-> 把 skill 当运行时代码测，而不是当 Markdown 看。
+在 npm 发布前，可以直接从源码仓库体验：
 
-## 它检查什么
+```bash
+git clone https://github.com/Looperswag/skill-doctor.git
+cd skill-doctor
+npm install
+npm run build
+node packages/cli/dist/index.js clinic --fixture demo --no-open --port 5201
+```
 
-- `SKILL.md` frontmatter 缺失、入口文件缺失
-- `references/`、`scripts/`、`assets/` 引用断链
-- hook 或脚本中的高风险模式，例如全局安装、`curl | bash`、裸 `printenv`、危险删除
-- 上下文污染，例如“永远使用这个 skill”或要求覆盖系统/开发者指令
-- Codex 与 Claude Code 路径漂移，例如遗留的 `.codex/skills`
-- 报告质量：文件、行号、证据、严重级别、治疗建议和自动修复边界
+打开 `http://127.0.0.1:5201`，你会看到一个故意“生病”的 demo skill。修复文件后，诊疗台会实时复诊，分数、病人详情和治疗报告会自动刷新。
+
+## 它解决什么问题
+
+Agent skills 很容易从“好用的小工具”变成“不可维护的黑箱”：
+
+- `SKILL.md` frontmatter 缺失，运行器很难稳定发现。
+- `references/`、`scripts/`、`assets/` 引用断链，复制到别人机器就坏。
+- hook 或脚本里混入 `curl | bash`、全局安装、裸 `printenv`、危险删除。
+- skill 描述过宽，例如“任何任务都必须使用我”，污染无关上下文。
+- Codex、Claude Code、多目录布局同时存在，人工排查成本高。
+- 评测结果散在终端里，没有证据、分数、优先级和复诊闭环。
+
+`skill-doctor` 的目标是把这些隐性维护成本压到一条命令里：扫描、评分、定位证据、展示风险、给出治疗建议、导出报告，并在用户修复时实时更新。
+
+## 和普通 skill 自查项目有什么不同
+
+很多自查工具停在“检查 Markdown 是否规范”。`skill-doctor` 更像一个小型 Agent 能力包 QA 系统。
+
+| 维度 | 普通自查 | Skill Doctor |
+| --- | --- | --- |
+| 检查对象 | 单个 skill 文件 | `.codex`、`.claude`、`.agents` 下的 skills、hooks、subagents、config |
+| 反馈方式 | 终端错误列表 | 诊疗台、血条、病区、病人详情、治疗队列 |
+| 证据粒度 | 大多只有规则名 | 文件、行号、证据、严重级别、扣分、建议 |
+| 修复闭环 | 重新手动运行 | 文件变更后实时复诊，前端自动刷新 |
+| 风险范围 | 结构 lint | 上下文污染、安全脚本、断链资源、运行器路径漂移 |
+| 输出物 | 文本 | `report.json`、`summary.md`、`findings.jsonl`、PNG |
+| 使用场景 | 开发者自用 | 本地体检、仓库发布前检查、CI 报告、用户可视化理解 |
+
+## 设计思路
+
+### 1. 每个能力文件夹都是一个“病人”
+
+Skill Doctor 不只把文件当静态文本，而是先建立 inventory：
+
+- Codex 病区：`.agents/skills`、`.codex/skills`、`.codex/agents`、hooks/config
+- Claude 病区：`.claude/skills`、`.claude/agents`、settings/config
+- 通用病区：用户显式传入的项目路径
+
+每个病人都有分数、门禁状态、置信度、发现项、治疗建议和预计恢复分。
+
+### 2. 评分不是为了吓人，而是为了排序
+
+规则会把问题拆成 `critical`、`high`、`medium`、`low`、`info`，并计算：
+
+- 当前健康分
+- 预计恢复分
+- 阻断项数量
+- 警告项数量
+- 发布门禁：可发布、警告、阻断、未知
+
+这样用户不需要从几十条提示里猜优先级，先治阻断，再处理警告。
+
+### 3. 可视化不是装饰，而是降低理解成本
+
+诊疗台用“病区、病人、血条、治疗队列”的隐喻，把 Agent 能力包质量变成可扫读的界面：
+
+- 左侧病区索引：快速知道 Codex/Claude 哪边更健康。
+- 中央恢复走势：当前分和预计恢复分一眼可见。
+- 右侧病人详情：路径、恢复进度、发现项、治疗建议集中展示。
+- 顶部实时状态：修复文件时显示复诊状态，完成后自动更新。
+
+这让非作者也能快速理解一个 skill 仓库“哪里坏、为什么坏、先修哪里”。
+
+### 4. 默认安全，不静默修改用户环境
+
+V1 默认只读扫描。`fix` 只支持 dry-run。唯一会写用户目录的命令是 `install-skill`，并且会在旧版本存在时备份，不会静默覆盖。
 
 ## 快速开始
 
-使用已发布 npm 包：
+### 方式一：扫描本机 Agent 配置（npm 包发布后）
 
 ```bash
-npx skill-doctor@latest clinic --home
-npx skill-doctor@latest scan --home --format markdown
-npx skill-doctor@latest install-skill --target both
+npx @looperswag/skill-doctor@latest clinic --home
 ```
 
-从源码仓库运行：
+这条命令会：
+
+1. 扫描当前用户 home 下的 Codex / Claude Code 能力目录。
+2. 生成 `report.json`、`summary.md`、`findings.jsonl`。
+3. 启动本地 Web 诊疗台。
+4. 默认监听被扫描目录，文件变更后自动复诊。
+
+关闭实时监听：
 
 ```bash
-npm install
-npm run build
-node packages/cli/dist/index.js clinic --fixture demo --no-open
+npx @looperswag/skill-doctor@latest clinic --home --no-watch
 ```
 
-内置 demo fixture 故意放了一个生病的 skill 和一个高风险 hook，方便你立刻看到诊疗效果。
-
-## CLI
+### 方式二：只生成报告
 
 ```bash
-skill-doctor clinic --home --runner codex,claude
-skill-doctor scan <path|--home> --format json|markdown|sarif
-skill-doctor install-skill --target codex|claude|both
-skill-doctor report reports/latest/report.json --format markdown
-skill-doctor fix --dry-run
+npx @looperswag/skill-doctor@latest scan --home --format markdown
+npx @looperswag/skill-doctor@latest scan ./my-skill --format json --out reports/latest
 ```
 
-V1 的 `fix` 只支持 dry-run。项目默认不修改真实 home 目录或全局运行器配置。
-
-## 像素诊疗台
-
-诊疗台被打包进 npm 包。CLI 会从 `packages/cli/dist/clinic` 服务预构建 React 应用，并通过 `/api/report` 提供报告数据。
-
-可视化模型：
-
-- 病区：Codex 病区、Claude 病区、通用病区
-- 病人：一个 skill、hook、subagent、config 或文件夹
-- 总血条：当前健康分
-- 恢复进度：治疗后的预期分数
-- 治疗队列：按病人聚合的发现项和建议
-
-## 报告格式
-
-V1 输出 `skill-doctor.report.v1`：
-
-```json
-{
-  "schema_version": "skill-doctor.report.v1",
-  "summary": {
-    "score": 86,
-    "confidence": 0.91,
-    "gate": "publishable",
-    "patient_counts": { "skill": 2, "hook": 1, "subagent": 1, "config": 1, "folder": 0 },
-    "blockers": 0,
-    "warnings": 3
-  },
-  "patients": [],
-  "findings": []
-}
-```
-
-报告会写出三类文件：
-
-- `report.json`
-- `summary.md`
-- `findings.jsonl`
-
-## 安装 skill
-
-使用 CLI：
+### 方式三：把 Skill Doctor 安装成 Agent skill
 
 ```bash
-npx skill-doctor@latest install-skill --target both
+npx @looperswag/skill-doctor@latest install-skill --target both
 ```
 
 默认安装位置：
@@ -102,12 +131,75 @@ npx skill-doctor@latest install-skill --target both
 - Codex：`$HOME/.agents/skills/skill-doctor`
 - Claude Code：`$HOME/.claude/skills/skill-doctor`
 
-手动安装：
+## CLI
 
 ```bash
-mkdir -p ~/.agents/skills ~/.claude/skills
-cp -R skill/skill-doctor ~/.agents/skills/skill-doctor
-cp -R skill/skill-doctor ~/.claude/skills/skill-doctor
+skill-doctor clinic --home --runner codex,claude
+skill-doctor clinic --fixture demo --no-open --port 5201
+skill-doctor scan <path|--home> --format json|markdown|sarif
+skill-doctor install-skill --target codex|claude|both
+skill-doctor report reports/latest/report.json --format markdown
+skill-doctor fix --dry-run
+```
+
+## 当前检查项
+
+- `SKILL.md` 入口文件缺失。
+- frontmatter 缺少 `name` 或 `description`。
+- `references/`、`scripts/`、`assets/` 引用断链。
+- Subagent 元数据缺失。
+- JSON 配置无法解析。
+- hook 配置缺少 replay fixture 线索。
+- 过宽触发描述，例如 `always use this skill`。
+- 试图覆盖 system/developer 指令的上下文污染。
+- `npm install -g`、`pip install --user` 等全局安装。
+- `curl | bash` 远程脚本直连执行。
+- `printenv` 泄露环境变量风险。
+- 危险删除模式。
+- 硬编码 `.claude`、`.codex`、`/Users/...` 等路径。
+
+## 报告格式
+
+V1 使用 `skill-doctor.report.v1`：
+
+```json
+{
+  "schema_version": "skill-doctor.report.v1",
+  "generated_at": "2026-07-08T08:48:34.292Z",
+  "summary": {
+    "score": 49,
+    "confidence": 0.89,
+    "gate": "blocked",
+    "patient_counts": {
+      "skill": 2,
+      "hook": 0,
+      "subagent": 1,
+      "config": 0,
+      "folder": 0
+    },
+    "blockers": 5,
+    "warnings": 1
+  },
+  "patients": [],
+  "findings": []
+}
+```
+
+报告会写出：
+
+- `report.json`：完整机器可读报告。
+- `summary.md`：适合发给团队或放进 PR 的治疗报告。
+- `findings.jsonl`：适合后续分析和 CI 聚合。
+
+## 项目结构
+
+```text
+packages/core      清单扫描、规则、评分、Markdown 报告
+packages/cli       npm CLI、本地 server、实时复诊、skill 模板、demo fixture
+apps/clinic        React/Vite 诊疗台，构建后打包进 CLI
+skill/skill-doctor 可复制给 Codex / Claude Code 使用的 skill
+docs               设计长文、原始项目笔记、README 资产
+fixtures           坏 skill、坏 hook、跨 runner 样例
 ```
 
 ## 开发
@@ -118,24 +210,21 @@ npm test
 npm run typecheck
 npm run build
 node packages/cli/dist/index.js scan --fixture demo --format markdown
-node packages/cli/dist/index.js clinic --fixture demo --no-open
-```
-
-项目结构：
-
-```text
-packages/core      清单扫描、规则、评分、报告渲染
-packages/cli       npm 包、CLI、内置 skill 模板、静态诊疗台服务
-apps/clinic        React/Vite 像素诊疗台，构建后进入 packages/cli/dist/clinic
-skill/skill-doctor 可直接复制给 Agent 使用的 skill
-docs               设计长文和原始项目笔记
+node packages/cli/dist/index.js clinic --fixture demo --no-open --port 5201
 ```
 
 ## 安全边界
 
 `skill-doctor` 不推荐 `curl | bash` 安装。一个专门检查 `curl | bash` 风险的工具，不应该用 `curl | bash` 分发自己。
 
-默认命令不会修改真实 home 目录。唯一会写入用户目录的是 `install-skill`，它只写入明确的 skill 目标目录，并在已有安装时先备份，不会静默覆盖。
+默认命令不会修改真实 home 目录、仓库文件或全局运行器配置。需要写入用户目录的场景必须显式调用 `install-skill`。
+
+## 适合谁
+
+- 正在维护 Codex / Claude Code skills 的个人开发者。
+- 想把私有 skill 仓库开放给别人复制使用的创作者。
+- 需要在团队内建立 Agent 能力包质量门禁的人。
+- 希望让非作者也能看懂 skill 质量和修复优先级的人。
 
 ## License
 
