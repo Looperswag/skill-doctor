@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { groupPatientsByWard, scoreTone, summarizeFindingCount } from "./report-model.js";
+import {
+  averageProjectedScore,
+  buildRecoverySeries,
+  groupPatientsByWard,
+  scoreTone,
+  severityBreakdown,
+  summarizeFindingCount
+} from "./report-model.js";
 import type { SkillDoctorReport } from "./types.js";
 
 const report: SkillDoctorReport = {
@@ -67,5 +74,44 @@ describe("report-model", () => {
 
   test("uses Simplified Chinese for empty finding summaries", () => {
     expect(summarizeFindingCount(report.patients[0]!)).toBe("无发现项");
+  });
+
+  test("derives projected average score from patients", () => {
+    expect(averageProjectedScore(report.patients)).toBe(79);
+    expect(averageProjectedScore([])).toBe(100);
+  });
+
+  test("builds stable recovery chart series from patients", () => {
+    expect(buildRecoverySeries(report.patients)).toEqual([
+      { id: "codex:skill:demo", label: "demo-skill", score: 44, projectedScore: 68 },
+      { id: "claude:hook:settings", label: "settings.json", score: 84, projectedScore: 90 }
+    ]);
+  });
+
+  test("summarizes finding severity distribution", () => {
+    const baseFinding = {
+      rule_id: "DEMO",
+      category: "demo",
+      file: "SKILL.md",
+      evidence: "demo",
+      message: "demo",
+      suggestion: "demo",
+      autofix: "manual",
+      deduction: 10,
+      patient_id: "codex:skill:demo"
+    };
+
+    expect(severityBreakdown([
+      { ...baseFinding, id: "critical", severity: "critical" },
+      { ...baseFinding, id: "high", severity: "high" },
+      { ...baseFinding, id: "medium", severity: "medium" }
+    ])).toEqual({
+      critical: 1,
+      high: 1,
+      medium: 1,
+      low: 0,
+      info: 0,
+      total: 3
+    });
   });
 });
