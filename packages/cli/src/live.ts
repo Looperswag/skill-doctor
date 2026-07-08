@@ -31,6 +31,60 @@ export type ClinicEvent =
       updated_at: string;
       message: string;
       report: SkillDoctorReport;
+    }
+  | {
+      type: "repair:start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      message: string;
+    }
+  | {
+      type: "repair:progress";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      step: number;
+      total_steps: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      finding_id: string;
+      progress: number;
+      remaining: number;
+      message: string;
+    }
+  | {
+      type: "repair:complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: 100;
+      message: string;
+    }
+  | {
+      type: "repair:error";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      message: string;
     };
 
 export type ClinicSnapshot = Extract<ClinicEvent, { type: "snapshot" }>;
@@ -113,6 +167,138 @@ export class ReportStore {
       message: this.error,
       report: this.report
     });
+  }
+
+  beginRepair(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    message: string;
+    progress?: number;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:start",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      progress: input.progress ?? 4,
+      message: input.message
+    });
+  }
+
+  progressRepair(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    progress: number;
+    step: number;
+    totalSteps: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:progress",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      progress: input.progress,
+      step: input.step,
+      total_steps: input.totalSteps,
+      message: input.message
+    });
+  }
+
+  completeRepairItem(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    findingId: string;
+    progress: number;
+    remaining: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:item-complete",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      finding_id: input.findingId,
+      progress: input.progress,
+      remaining: input.remaining,
+      message: input.message
+    });
+  }
+
+  completeRepair(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    message: string;
+    report?: SkillDoctorReport;
+  }): void {
+    if (input.report) {
+      this.report = input.report;
+      this.state = "idle";
+      this.error = undefined;
+      this.version += 1;
+      this.updatedAt = input.report.generated_at;
+    } else {
+      this.nextEventTime();
+    }
+    this.emit({
+      type: "repair:complete",
+      version: this.version,
+      updated_at: this.updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      progress: 100,
+      message: input.message
+    });
+    if (input.report) {
+      this.version += 1;
+      this.emit({
+        type: "scan:complete",
+        version: this.version,
+        state: "idle",
+        updated_at: this.updatedAt,
+        report: input.report
+      });
+    }
+  }
+
+  failRepair(input: {
+    jobId: string;
+    patientId: string;
+    patientName: string;
+    progress: number;
+    message: string;
+  }): void {
+    const updatedAt = this.nextEventTime();
+    this.emit({
+      type: "repair:error",
+      version: this.version,
+      updated_at: updatedAt,
+      job_id: input.jobId,
+      patient_id: input.patientId,
+      patient_name: input.patientName,
+      progress: input.progress,
+      message: input.message
+    });
+  }
+
+  private nextEventTime(): string {
+    this.version += 1;
+    this.updatedAt = new Date().toISOString();
+    return this.updatedAt;
   }
 
   private emit(event: ClinicEvent): void {

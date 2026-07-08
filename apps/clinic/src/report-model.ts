@@ -59,7 +59,7 @@ export function groupPatientsByWard(report: SkillDoctorReport): Ward[] {
   const order: Runner[] = ["codex", "claude", "generic"];
   return order
     .map((runner) => {
-      const patients = report.patients.filter((patient) => patient.runner === runner);
+      const patients = sortPatientsByUrgency(report.patients.filter((patient) => patient.runner === runner));
       return {
         id: runner,
         label: WARD_LABELS[runner],
@@ -92,8 +92,23 @@ export function averageProjectedScore(patients: Patient[]): number {
   return Math.round(total / patients.length);
 }
 
-export function buildRecoverySeries(patients: Patient[]): RecoveryPoint[] {
-  return patients.map((patient) => ({
+export function sortPatientsByUrgency(patients: Patient[]): Patient[] {
+  return [...patients].sort((left, right) => {
+    const scoreDelta = left.score - right.score;
+    if (scoreDelta !== 0) return scoreDelta;
+
+    const issueDelta = right.issues.length - left.issues.length;
+    if (issueDelta !== 0) return issueDelta;
+
+    const projectedDelta = right.projected_score - left.projected_score;
+    if (projectedDelta !== 0) return projectedDelta;
+
+    return left.name.localeCompare(right.name, "zh-CN");
+  });
+}
+
+export function buildRecoverySeries(patients: Patient[], limit = 12): RecoveryPoint[] {
+  return sortPatientsByUrgency(patients).slice(0, limit).map((patient) => ({
     id: patient.id,
     label: patient.name,
     score: patient.score,

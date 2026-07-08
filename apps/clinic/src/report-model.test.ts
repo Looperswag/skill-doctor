@@ -6,6 +6,7 @@ import {
   groupPatientsByWard,
   scoreTone,
   severityBreakdown,
+  sortPatientsByUrgency,
   summarizeFindingCount
 } from "./report-model.js";
 import type { SkillDoctorReport } from "./types.js";
@@ -87,6 +88,23 @@ describe("report-model", () => {
       { id: "codex:skill:demo", label: "demo-skill", score: 44, projectedScore: 68 },
       { id: "claude:hook:settings", label: "settings.json", score: 84, projectedScore: 90 }
     ]);
+  });
+
+  test("prioritizes low-score patients and limits recovery chart density", () => {
+    const manyPatients = [
+      ...report.patients,
+      ...Array.from({ length: 14 }, (_, index) => ({
+        ...report.patients[1]!,
+        id: `claude:hook:extra-${index}`,
+        name: `extra-${index}`,
+        score: index === 3 ? 12 : 70 + index,
+        projected_score: index === 3 ? 55 : 90
+      }))
+    ];
+
+    expect(sortPatientsByUrgency(manyPatients)[0]?.name).toBe("extra-3");
+    expect(buildRecoverySeries(manyPatients)).toHaveLength(12);
+    expect(buildRecoverySeries(manyPatients)[0]).toMatchObject({ label: "extra-3", score: 12 });
   });
 
   test("summarizes finding severity distribution", () => {

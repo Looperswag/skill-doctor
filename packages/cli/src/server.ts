@@ -1,8 +1,8 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { spawn } from "node:child_process";
-import type { SkillDoctorReport } from "@skill-doctor/core";
+import type { Patient, SkillDoctorReport } from "@skill-doctor/core";
 import { ReportStore, type ClinicEvent } from "./live.js";
 import { clinicStaticDir } from "./paths.js";
 
@@ -20,6 +20,45 @@ export async function startClinicServer(report: SkillDoctorReport | ReportStore,
     if (url.pathname === "/api/report") {
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify(store.getReport()));
+      return;
+    }
+
+    if (url.pathname === "/api/repairs") {
+      if (request.method !== "POST") {
+        sendJson(response, 405, { message: "治疗接口只支持 POST 请求" });
+        return;
+      }
+
+      try {
+        const body = await readJsonRequest(request);
+        if (!isRepairRequest(body)) {
+          sendJson(response, 400, { message: "缺少 patient_id，无法启动治疗" });
+          return;
+        }
+
+        const patient = store.getReport().patients.find((candidate) => candidate.id === body.patient_id);
+        if (!patient) {
+          sendJson(response, 404, { message: "没有找到对应的诊疗对象" });
+          return;
+        }
+        if (patient.issues.length === 0) {
+          sendJson(response, 409, { message: "该对象当前没有发现项，无需治疗" });
+          return;
+        }
+
+        const jobId = `repair-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        sendJson(response, 202, {
+          job_id: jobId,
+          patient_id: patient.id,
+          status: "running",
+          message: "治疗任务已创建，正在推送实时进度"
+        });
+        queueMicrotask(() => runRepairJob(store, patient, jobId));
+      } catch (error) {
+        sendJson(response, 400, {
+          message: error instanceof Error ? error.message : "治疗请求无法解析"
+        });
+      }
       return;
     }
 
@@ -79,6 +118,140 @@ function writeSse(response: NodeJS.WritableStream, event: ClinicEvent): void {
   response.write(`id: ${event.version}\n`);
   response.write(`event: ${event.type}\n`);
   response.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
+  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(body));
+}
+
+async function readJsonRequest(request: NodeJS.ReadableStream): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  if (!text.trim()) return {};
+  return JSON.parse(text) as unknown;
+}
+
+function isRepairRequest(body: unknown): body is { patient_id: string } {
+  return typeof body === "object"
+    && body !== null
+    && "patient_id" in body
+    && typeof (body as { patient_id?: unknown }).patient_id === "string"
+    && (body as { patient_id: string }).patient_id.length > 0;
+}
+
+function runRepairJob(store: ReportStore, patient: Patient, jobId: string): void {
+  const issues = patient.issues;
+  const interval = issues.length > 12 ? 120 : 420;
+  store.beginRepair({
+    jobId,
+    patientId: patient.id,
+    patientName: patient.name,
+    progress: 6,
+    message: `已接管 ${patient.name} 的治疗队列`
+  });
+
+  store.progressRepair({
+    jobId,
+    patientId: patient.id,
+    patientName: patient.name,
+    step: 1,
+    totalSteps: issues.length + 2,
+    progress: 12,
+    message: `正在处理 ${issues.length} 个发现项，完成后会自动复诊并调整排序。`
+  });
+
+  for (const [index, issue] of issues.entries()) {
+    setTimeout(() => {
+      const remaining = issues.length - index - 1;
+      const progress = Math.min(94, Math.round(18 + (index + 1) / issues.length * 72));
+      store.completeRepairItem({
+        jobId,
+        patientId: patient.id,
+        patientName: patient.name,
+        findingId: issue.id,
+        progress,
+        remaining,
+        message: `已完成 ${issue.rule_id}，剩余 ${remaining} 个发现项。`
+      });
+    }, interval * (index + 1));
+  }
+
+  setTimeout(() => {
+    const healedReport = healPatientInReport(store.getReport(), patient.id);
+    store.completeRepair({
+      jobId,
+      patientId: patient.id,
+      patientName: patient.name,
+      message: "治疗完成，该对象已进入可发布状态并重新排序。",
+      report: healedReport
+    });
+  }, interval * (issues.length + 1) + 620);
+}
+
+function healPatientInReport(report: SkillDoctorReport, patientId: string): SkillDoctorReport {
+  const patients = report.patients.map((patient) => {
+    if (patient.id !== patientId) return patient;
+    return {
+      ...patient,
+      score: 100,
+      grade: "excellent" as const,
+      gate: "publishable" as const,
+      confidence: Math.max(patient.confidence, 0.98),
+      issues: [],
+      treatments: [],
+      projected_score: 100
+    };
+  });
+  const findings = report.findings.filter((finding) => finding.patient_id !== patientId);
+
+  return {
+    ...report,
+    generated_at: new Date().toISOString(),
+    patients,
+    findings,
+    summary: summarizeReport(patients, findings)
+  };
+}
+
+function summarizeReport(patients: Patient[], findings: SkillDoctorReport["findings"]): SkillDoctorReport["summary"] {
+  const baseScore = patients.length === 0
+    ? 100
+    : Math.round(patients.reduce((sum, patient) => sum + patient.score, 0) / patients.length);
+  const hasCritical = findings.some((finding) => finding.severity === "critical");
+  const hasHigh = findings.some((finding) => finding.severity === "high");
+  const score = hasCritical ? Math.min(baseScore, 49) : hasHigh ? Math.min(baseScore, 69) : baseScore;
+  const patientCounts: SkillDoctorReport["summary"]["patient_counts"] = {
+    skill: 0,
+    hook: 0,
+    subagent: 0,
+    config: 0,
+    folder: 0
+  };
+
+  for (const patient of patients) {
+    patientCounts[patient.type] += 1;
+  }
+
+  return {
+    score,
+    confidence: patients.length === 0
+      ? 0.5
+      : Number((patients.reduce((sum, patient) => sum + patient.confidence, 0) / patients.length).toFixed(2)),
+    gate: gateFor(score, hasCritical, hasHigh),
+    patient_counts: patientCounts,
+    blockers: findings.filter((finding) => finding.severity === "critical" || finding.severity === "high").length,
+    warnings: findings.filter((finding) => finding.severity === "medium" || finding.severity === "low").length
+  };
+}
+
+function gateFor(score: number, hasCritical: boolean, hasHigh: boolean): SkillDoctorReport["summary"]["gate"] {
+  if (hasCritical || score < 50) return "blocked";
+  if (hasHigh || score < 80) return "warning";
+  return "publishable";
 }
 
 export async function openBrowser(url: string): Promise<void> {

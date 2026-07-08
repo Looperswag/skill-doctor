@@ -28,6 +28,7 @@ import {
   scoreTone,
   severityBreakdown,
   severityRows,
+  sortPatientsByUrgency,
   summarizeFindingCount
 } from "./report-model.js";
 import type { RecoveryPoint, SeverityBreakdown, Tone, Ward } from "./report-model.js";
@@ -43,6 +44,15 @@ type LiveState =
   | { state: "ready"; message: string; updatedAt?: string; version?: number }
   | { state: "scanning"; message: string; updatedAt?: string; version?: number }
   | { state: "error"; message: string; updatedAt?: string; version?: number };
+
+type RepairState = {
+  status: "idle" | "running" | "complete" | "error";
+  progress: number;
+  message: string;
+  jobId?: string | undefined;
+  updatedAt?: string | undefined;
+  completedFindingIds?: string[] | undefined;
+};
 
 type ClinicLivePayload =
   | {
@@ -73,11 +83,70 @@ type ClinicLivePayload =
       updated_at: string;
       message: string;
       report: SkillDoctorReport;
+    }
+  | {
+      type: "repair:start";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      message: string;
+    }
+  | {
+      type: "repair:progress";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      step: number;
+      total_steps: number;
+      message: string;
+    }
+  | {
+      type: "repair:item-complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      finding_id: string;
+      progress: number;
+      remaining: number;
+      message: string;
+    }
+  | {
+      type: "repair:complete";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: 100;
+      message: string;
+    }
+  | {
+      type: "repair:error";
+      version: number;
+      updated_at: string;
+      job_id: string;
+      patient_id: string;
+      patient_name: string;
+      progress: number;
+      message: string;
     };
+
+type RepairPayload = Extract<ClinicLivePayload, {
+  type: "repair:start" | "repair:progress" | "repair:item-complete" | "repair:complete" | "repair:error";
+}>;
 
 export function App() {
   const [loadState, setLoadState] = useState<LoadState>({ state: "loading" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [repairStates, setRepairStates] = useState<Record<string, RepairState>>({});
   const [liveState, setLiveState] = useState<LiveState>({
     state: "connecting",
     message: "正在连接实时复诊"
@@ -89,10 +158,16 @@ export function App() {
     let pollingTimer: number | undefined;
 
     const applyReport = (report: SkillDoctorReport) => {
-      setLoadState({ state: "ready", report });
-      setSelectedId((currentId) => {
-        if (currentId && report.patients.some((patient) => patient.id === currentId)) return currentId;
-        return report.patients[0]?.id ?? null;
+      withViewTransition(() => {
+        setLoadState({ state: "ready", report });
+        setSelectedId((currentId) => {
+          if (currentId && report.patients.some((patient) => patient.id === currentId)) return currentId;
+          return sortPatientsByUrgency(report.patients)[0]?.id ?? null;
+        });
+        setRepairStates((current) => {
+          const activeIds = new Set(report.patients.map((patient) => patient.id));
+          return Object.fromEntries(Object.entries(current).filter(([patientId]) => activeIds.has(patientId)));
+        });
       });
     };
 
@@ -185,6 +260,20 @@ export function App() {
         });
       });
 
+      const handleRepairEvent = (event: Event) => {
+        const payload = parseLivePayload(event);
+        if (!payload || !isRepairPayload(payload) || cancelled) return;
+        setRepairStates((current) => ({
+          ...current,
+          [payload.patient_id]: repairStateFromPayload(payload, current[payload.patient_id])
+        }));
+      };
+      eventSource.addEventListener("repair:start", handleRepairEvent);
+      eventSource.addEventListener("repair:progress", handleRepairEvent);
+      eventSource.addEventListener("repair:item-complete", handleRepairEvent);
+      eventSource.addEventListener("repair:complete", handleRepairEvent);
+      eventSource.addEventListener("repair:error", handleRepairEvent);
+
       eventSource.onerror = () => {
         if (cancelled) return;
         eventSource?.close();
@@ -217,32 +306,105 @@ export function App() {
     };
   }, []);
 
+  const startRepair = async (patient: Patient) => {
+    setRepairStates((current) => ({
+      ...current,
+      [patient.id]: {
+        status: "running",
+        progress: Math.max(4, current[patient.id]?.progress ?? 0),
+        message: "治疗任务已提交，正在建立实时进度...",
+        jobId: current[patient.id]?.jobId,
+        updatedAt: new Date().toISOString(),
+        completedFindingIds: []
+      }
+    }));
+
+    try {
+      const response = await fetch("/api/repairs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ patient_id: patient.id })
+      });
+      const payload = await response.json().catch(() => null) as { job_id?: string; message?: string } | null;
+      if (!response.ok) throw new Error(payload?.message ?? `治疗请求失败：${response.status}`);
+      setRepairStates((current) => ({
+        ...current,
+        [patient.id]: {
+          ...current[patient.id],
+          status: "running",
+          progress: Math.max(current[patient.id]?.progress ?? 0, 8),
+          message: payload?.message ?? "治疗任务已创建",
+          jobId: payload?.job_id,
+          updatedAt: new Date().toISOString(),
+          completedFindingIds: current[patient.id]?.completedFindingIds ?? []
+        }
+      }));
+    } catch (error) {
+      setRepairStates((current) => ({
+        ...current,
+        [patient.id]: {
+          status: "error",
+          progress: current[patient.id]?.progress ?? 0,
+          message: error instanceof Error ? error.message : "治疗请求失败",
+          jobId: current[patient.id]?.jobId,
+          updatedAt: new Date().toISOString(),
+          completedFindingIds: current[patient.id]?.completedFindingIds ?? []
+        }
+      }));
+    }
+  };
+
+  const startAllRepairs = async (patients: Patient[]) => {
+    const targets = sortPatientsByUrgency(patients).filter((patient) => (
+      patient.issues.length > 0 && repairStates[patient.id]?.status !== "running"
+    ));
+    await Promise.all(targets.map((patient) => startRepair(patient)));
+  };
+
   if (loadState.state === "loading") return <LoadingState />;
   if (loadState.state === "error") return <ErrorState message={loadState.message} />;
 
   const selectedPatient = loadState.report.patients.find((patient) => patient.id === selectedId) ?? loadState.report.patients[0] ?? null;
   return (
-    <Clinic report={loadState.report} liveState={liveState} selectedPatient={selectedPatient} onSelectPatient={setSelectedId} />
+    <Clinic
+      report={loadState.report}
+      liveState={liveState}
+      repairStates={repairStates}
+      selectedPatient={selectedPatient}
+      onSelectPatient={setSelectedId}
+      onStartRepair={startRepair}
+      onStartAllRepairs={startAllRepairs}
+    />
   );
 }
 
 function Clinic({
   report,
   liveState,
+  repairStates,
   selectedPatient,
-  onSelectPatient
+  onSelectPatient,
+  onStartRepair,
+  onStartAllRepairs
 }: {
   report: SkillDoctorReport;
   liveState: LiveState;
+  repairStates: Record<string, RepairState>;
   selectedPatient: Patient | null;
   onSelectPatient: (id: string) => void;
+  onStartRepair: (patient: Patient) => Promise<void>;
+  onStartAllRepairs: (patients: Patient[]) => Promise<void>;
 }) {
   const wards = useMemo(() => groupPatientsByWard(report), [report]);
   const projectedScore = useMemo(() => averageProjectedScore(report.patients), [report.patients]);
+  const rankedPatients = useMemo(() => sortPatientsByUrgency(report.patients), [report.patients]);
   const recoverySeries = useMemo(() => buildRecoverySeries(report.patients), [report.patients]);
   const severityMix = useMemo(() => severityBreakdown(report.findings), [report.findings]);
   const tone = scoreTone(report.summary.score);
   const projectedGain = Math.max(0, projectedScore - report.summary.score);
+  const selectedRepairState = selectedPatient ? repairStates[selectedPatient.id] : undefined;
+  const repairableCount = rankedPatients.filter((patient) => patient.issues.length > 0).length;
+  const runningRepairCount = rankedPatients.filter((patient) => repairStates[patient.id]?.status === "running").length;
 
   return (
     <main className="clinic-shell">
@@ -258,6 +420,13 @@ function Clinic({
 
         <div className="app-actions">
           <LivePill liveState={liveState} />
+          <TreatAllButton
+            count={repairableCount}
+            runningCount={runningRepairCount}
+            onClick={() => {
+              void onStartAllRepairs(rankedPatients);
+            }}
+          />
           <GatePill gate={report.summary.gate} />
           <div className={`score-chip tone-${tone}`} aria-label={`整体健康分 ${report.summary.score} 分，满分 100 分`}>
             <Stethoscope aria-hidden="true" size={18} />
@@ -315,14 +484,14 @@ function Clinic({
 
           <section className="diagnostic-main">
             <div className="insight-grid">
-              <RecoveryChart points={recoverySeries} />
+              <RecoveryChart points={recoverySeries} totalCount={report.patients.length} />
               <SeverityDonut breakdown={severityMix} />
             </div>
 
-            <PatientTable patients={report.patients} selectedPatient={selectedPatient} onSelectPatient={onSelectPatient} />
+            <PatientTable patients={rankedPatients} repairStates={repairStates} selectedPatient={selectedPatient} onSelectPatient={onSelectPatient} />
           </section>
 
-          <PatientPanel patient={selectedPatient} />
+          <PatientPanel patient={selectedPatient} repairState={selectedRepairState} onStartRepair={onStartRepair} />
         </section>
       )}
     </main>
@@ -341,6 +510,49 @@ function parseLivePayload(event: Event): ClinicLivePayload | null {
   } catch {
     return null;
   }
+}
+
+function withViewTransition(update: () => void) {
+  const documentWithTransition = document as Document & {
+    startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+  };
+  if (typeof documentWithTransition.startViewTransition !== "function") {
+    update();
+    return;
+  }
+  void documentWithTransition.startViewTransition(update).finished.catch(() => undefined);
+}
+
+function isRepairPayload(payload: ClinicLivePayload): payload is RepairPayload {
+  return payload.type.startsWith("repair:");
+}
+
+function repairStateFromPayload(
+  payload: RepairPayload,
+  previous?: RepairState
+): RepairState {
+  const base = {
+    progress: clampScore(payload.progress),
+    message: payload.message,
+    jobId: payload.job_id,
+    updatedAt: payload.updated_at,
+    completedFindingIds: previous?.completedFindingIds ?? []
+  };
+
+  if (payload.type === "repair:item-complete") {
+    return {
+      ...base,
+      status: "running",
+      completedFindingIds: Array.from(new Set([...base.completedFindingIds, payload.finding_id]))
+    };
+  }
+  if (payload.type === "repair:complete") return { ...base, status: "complete", progress: 100 };
+  if (payload.type === "repair:error") return { ...base, status: "error" };
+  return {
+    ...base,
+    status: "running",
+    progress: Math.max(previous?.progress ?? 0, base.progress)
+  };
 }
 
 function LivePill({ liveState }: { liveState: LiveState }) {
@@ -436,7 +648,7 @@ function WardRail({
   );
 }
 
-function RecoveryChart({ points }: { points: RecoveryPoint[] }) {
+function RecoveryChart({ points, totalCount }: { points: RecoveryPoint[]; totalCount: number }) {
   if (points.length === 0) {
     return (
       <section className="chart-card panel-card" aria-label="恢复走势">
@@ -446,32 +658,38 @@ function RecoveryChart({ points }: { points: RecoveryPoint[] }) {
     );
   }
 
-  const currentLine = recoveryPolyline(points, "score");
-  const projectedLine = recoveryPolyline(points, "projectedScore");
+  const hiddenCount = Math.max(0, totalCount - points.length);
 
   return (
     <section className="chart-card panel-card" aria-label="恢复走势">
-      <ChartHeading icon={<BarChart3 size={18} />} title="恢复走势" caption="当前分与预计恢复分对比" />
-      <div className="chart-legend" aria-hidden="true">
+      <ChartHeading
+        icon={<BarChart3 size={18} />}
+        title="恢复走势"
+        caption={`低分优先展示 ${points.length} 个对象${hiddenCount > 0 ? `，其余 ${hiddenCount} 个在清单中查看` : ""}`}
+      />
+      <div className="chart-legend">
         <span className="legend-current">当前分</span>
         <span className="legend-projected">预计恢复</span>
+        <span className="legend-gain">提升空间</span>
       </div>
-      <div className="recovery-chart" role="img" aria-label="病人当前健康分与预计恢复分阶梯图">
+      <div className="recovery-viewport" role="img" aria-label="按当前分从低到高排列的恢复走势图">
+        <div className="recovery-chart">
         <div className="chart-grid-lines" aria-hidden="true" />
-        <svg className="recovery-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          <polyline className="line-projected" points={projectedLine} vectorEffect="non-scaling-stroke" />
-          <polyline className="line-current" points={currentLine} vectorEffect="non-scaling-stroke" />
-        </svg>
         {points.map((point) => (
           <div className="recovery-column" key={point.id}>
+            <span className="column-score current">{point.score}</span>
+            <span className="column-score projected">{point.projectedScore}</span>
             <div className="column-track">
-              <span className="score-tags" aria-hidden="true">
-                <span className="score-tag current">{point.score}</span>
-                <span className="score-tag projected">{point.projectedScore}</span>
-              </span>
               <span
                 className="column-projected"
                 style={{ height: `${clampScore(point.projectedScore)}%` }}
+              />
+              <span
+                className="column-gain"
+                style={{
+                  height: `${Math.max(0, clampScore(point.projectedScore) - clampScore(point.score))}%`,
+                  bottom: `${clampScore(point.score)}%`
+                }}
               />
               <span
                 className={`column-current tone-${scoreTone(point.score)}`}
@@ -481,6 +699,7 @@ function RecoveryChart({ points }: { points: RecoveryPoint[] }) {
             <span className="column-label" title={point.label}>{shortLabel(point.label)}</span>
           </div>
         ))}
+        </div>
       </div>
     </section>
   );
@@ -499,7 +718,7 @@ function SeverityDonut({ breakdown }: { breakdown: SeverityBreakdown }) {
       ) : (
         <div className="donut-layout">
           <div
-            className="severity-donut"
+            className={`severity-donut ${breakdown.total >= 100 ? "is-large-total" : ""}`}
             role="img"
             aria-label={`严重 ${breakdown.critical} 个，高 ${breakdown.high} 个，中 ${breakdown.medium} 个，低 ${breakdown.low} 个，信息 ${breakdown.info} 个`}
             style={{ background: donutGradient(breakdown) }}
@@ -535,10 +754,12 @@ function ChartHeading({ icon, title, caption }: { icon: React.ReactNode; title: 
 
 function PatientTable({
   patients,
+  repairStates,
   selectedPatient,
   onSelectPatient
 }: {
   patients: Patient[];
+  repairStates: Record<string, RepairState>;
   selectedPatient: Patient | null;
   onSelectPatient: (id: string) => void;
 }) {
@@ -562,11 +783,12 @@ function PatientTable({
         </div>
         {patients.map((patient) => (
           <button
-            className={`patient-row tone-${scoreTone(patient.score)} ${selectedPatient?.id === patient.id ? "is-selected" : ""}`}
+            className={`patient-row tone-${scoreTone(patient.score)} ${selectedPatient?.id === patient.id ? "is-selected" : ""} ${repairStates[patient.id]?.status === "complete" ? "is-repair-complete" : ""}`}
             key={patient.id}
             type="button"
             aria-pressed={selectedPatient?.id === patient.id}
             onClick={() => onSelectPatient(patient.id)}
+            style={{ viewTransitionName: patientTransitionName(patient.id) }}
           >
             <span className="patient-identity">
               <span className="patient-avatar" aria-hidden="true">{avatarFor(patient.type)}</span>
@@ -587,7 +809,15 @@ function PatientTable({
   );
 }
 
-function PatientPanel({ patient }: { patient: Patient | null }) {
+function PatientPanel({
+  patient,
+  repairState,
+  onStartRepair
+}: {
+  patient: Patient | null;
+  repairState: RepairState | undefined;
+  onStartRepair: (patient: Patient) => Promise<void>;
+}) {
   if (!patient) {
     return (
       <aside className="patient-panel panel-card" aria-label="病人详情">
@@ -598,6 +828,8 @@ function PatientPanel({ patient }: { patient: Patient | null }) {
       </aside>
     );
   }
+
+  const completedFindingIds = new Set(repairState?.completedFindingIds ?? []);
 
   return (
     <aside className="patient-panel panel-card" aria-label={`${patient.name} 诊疗详情`}>
@@ -617,13 +849,15 @@ function PatientPanel({ patient }: { patient: Patient | null }) {
         <span className={`status-pill gate-${patient.gate}`}>{displayGate(patient.gate)}</span>
       </div>
 
+      <RepairControls patient={patient} state={repairState} onStartRepair={onStartRepair} />
+
       <div className="treatment-list">
         <h3>治疗队列</h3>
         {patient.issues.length === 0 ? (
           <p className="quiet">无需治疗。</p>
         ) : (
           patient.issues.map((issue) => (
-            <article className={`finding severity-${issue.severity}`} key={issue.id}>
+            <article className={`finding severity-${issue.severity} ${completedFindingIds.has(issue.id) ? "is-resolved" : ""}`} key={issue.id}>
               <div className="finding-head">
                 <strong>{issue.rule_id}</strong>
                 <span>{displaySeverity(issue.severity)}</span>
@@ -636,6 +870,61 @@ function PatientPanel({ patient }: { patient: Patient | null }) {
         )}
       </div>
     </aside>
+  );
+}
+
+function RepairControls({
+  patient,
+  state,
+  onStartRepair
+}: {
+  patient: Patient;
+  state: RepairState | undefined;
+  onStartRepair: (patient: Patient) => Promise<void>;
+}) {
+  const repairState = state ?? {
+    status: "idle" as const,
+    progress: 0,
+    message: patient.issues.length === 0 ? "当前对象无需治疗。" : repairReadiness(patient)
+  };
+  const hasIssues = patient.issues.length > 0;
+  const isRunning = repairState.status === "running";
+  const isComplete = repairState.status === "complete";
+  const actionLabel = isComplete ? "再次治疗" : isRunning ? "治疗中" : "开始治疗";
+
+  return (
+    <section className={`repair-card repair-${repairState.status}`} aria-label="治疗控制" aria-live="polite">
+      <div className="repair-head">
+        <div>
+          <p>治疗控制</p>
+          <h3>{hasIssues ? "可启动实时治疗流程" : "状态健康"}</h3>
+        </div>
+        <span className={`repair-badge repair-${repairState.status}`}>
+          {isComplete ? <CheckCircle2 aria-hidden="true" size={15} /> : <Sparkles aria-hidden="true" size={15} />}
+          {repairStatusLabel(repairState.status)}
+        </span>
+      </div>
+      <div className="repair-progress-row">
+        <span>治疗进度</span>
+        <strong>{Math.round(clampScore(repairState.progress))}%</strong>
+      </div>
+      <div className="repair-meter" aria-label={`治疗进度 ${Math.round(clampScore(repairState.progress))}%`}>
+        <span style={{ width: `${clampScore(repairState.progress)}%` }} />
+      </div>
+      <p className="repair-message">{repairState.message}</p>
+      {isComplete ? <p className="repair-done">治疗完成。该对象已进入可发布状态，并会在清单中自然后移。</p> : null}
+      <button
+        className="repair-button"
+        type="button"
+        disabled={!hasIssues || isRunning}
+        onClick={() => {
+          void onStartRepair(patient);
+        }}
+      >
+        {isRunning ? <RefreshCw aria-hidden="true" size={16} /> : isComplete ? <CheckCircle2 aria-hidden="true" size={16} /> : <Sparkles aria-hidden="true" size={16} />}
+        <span>{hasIssues ? actionLabel : "无需治疗"}</span>
+      </button>
+    </section>
   );
 }
 
@@ -670,6 +959,48 @@ function MiniSparkline({ value, projected }: { value: number; projected: number 
       <span style={{ height: `${Math.max(12, clampScore(projected))}%` }} />
     </span>
   );
+}
+
+function TreatAllButton({
+  count,
+  runningCount,
+  onClick
+}: {
+  count: number;
+  runningCount: number;
+  onClick: () => void;
+}) {
+  const disabled = count === 0 || runningCount > 0;
+  const label = count === 0 ? "全部可发布" : runningCount > 0 ? `治疗中 ${runningCount}` : "一键治疗";
+
+  return (
+    <button className={`treat-all-button ${runningCount > 0 ? "is-running" : ""}`} type="button" disabled={disabled} onClick={onClick}>
+      {runningCount > 0 ? <RefreshCw aria-hidden="true" size={16} /> : <Sparkles aria-hidden="true" size={16} />}
+      <span>{label}</span>
+      {count > 0 ? <strong>{count}</strong> : null}
+    </button>
+  );
+}
+
+function repairReadiness(patient: Patient): string {
+  const autoFixable = patient.issues.filter((issue) => issue.autofix === "safe_autofix").length;
+  const reviewRequired = patient.issues.filter((issue) => issue.autofix === "review_required").length;
+  if (autoFixable > 0) return `${autoFixable} 个发现项可安全治疗，${reviewRequired} 个需要复核。`;
+  if (reviewRequired > 0) return `${reviewRequired} 个发现项需要先生成治疗方案并人工确认。`;
+  return "当前发现项需要人工处理，诊疗台会生成清晰的治疗步骤。";
+}
+
+function repairStatusLabel(status: RepairState["status"]): string {
+  switch (status) {
+    case "idle":
+      return "待治疗";
+    case "running":
+      return "治疗中";
+    case "complete":
+      return "已完成";
+    case "error":
+      return "失败";
+  }
 }
 
 function GatePill({ gate }: { gate: SkillDoctorReport["summary"]["gate"] }) {
@@ -823,17 +1154,13 @@ function clampScore(score: number): number {
   return Math.max(0, Math.min(100, score));
 }
 
-function recoveryPolyline(points: RecoveryPoint[], key: "score" | "projectedScore"): string {
-  return points.map((point, index) => {
-    const x = (index + 0.5) / points.length * 100;
-    const y = 96 - clampScore(point[key]) * 0.88;
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(" ");
-}
-
 function shortLabel(label: string): string {
   if (label.length <= 10) return label;
   return `${label.slice(0, 9)}…`;
+}
+
+function patientTransitionName(id: string): string {
+  return `patient-${id.replace(/[^a-zA-Z0-9_-]/gu, "-")}`;
 }
 
 function formatDateTime(value: string): string {
