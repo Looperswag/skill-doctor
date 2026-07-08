@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -18,7 +18,9 @@ import {
 } from "lucide-react";
 import {
   averageProjectedScore,
+  buildLlmRepairPrompt,
   buildMarkdownSummary,
+  buildManualReviewQueue,
   buildRecoverySeries,
   displayGate,
   displayPatientType,
@@ -31,7 +33,7 @@ import {
   sortPatientsByUrgency,
   summarizeFindingCount
 } from "./report-model.js";
-import type { RecoveryPoint, SeverityBreakdown, Tone, Ward } from "./report-model.js";
+import type { ManualReviewItem, RecoveryPoint, SeverityBreakdown, Tone, Ward } from "./report-model.js";
 import type { Patient, Severity, SkillDoctorReport } from "./types.js";
 
 type LoadState =
@@ -236,10 +238,20 @@ export function App() {
     manualRequired: 0,
     message: "暂无治疗任务"
   });
+  const [confirmedFindingIds, setConfirmedFindingIds] = useState<string[]>([]);
+  const [manualDialogOpen, setManualDialogOpen] = useState(false);
+  const [autoOpenedReviewJobId, setAutoOpenedReviewJobId] = useState<string | undefined>();
   const [liveState, setLiveState] = useState<LiveState>({
     state: "connecting",
     message: "正在连接实时复诊"
   });
+
+  const activeReport = loadState.state === "ready" ? loadState.report : null;
+  const manualReviewQueue = useMemo(
+    () => activeReport ? buildManualReviewQueue(activeReport, confirmedFindingIds) : [],
+    [activeReport, confirmedFindingIds]
+  );
+  const pendingManualReviewCount = manualReviewQueue.filter((item) => item.status === "pending").length;
 
   useEffect(() => {
     let cancelled = false;
@@ -422,6 +434,26 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!activeReport) return;
+    const activeFindingIds = new Set(activeReport.findings.map((finding) => finding.id));
+    setConfirmedFindingIds((current) => current.filter((findingId) => activeFindingIds.has(findingId)));
+  }, [activeReport]);
+
+  useEffect(() => {
+    if (
+      batchRepairState.status !== "complete"
+      || batchRepairState.manualRequired === 0
+      || pendingManualReviewCount === 0
+      || !batchRepairState.jobId
+      || autoOpenedReviewJobId === batchRepairState.jobId
+    ) {
+      return;
+    }
+    setManualDialogOpen(true);
+    setAutoOpenedReviewJobId(batchRepairState.jobId);
+  }, [autoOpenedReviewJobId, batchRepairState.jobId, batchRepairState.manualRequired, batchRepairState.status, pendingManualReviewCount]);
+
   const startRepair = async (patient: Patient) => {
     setRepairStates((current) => ({
       ...current,
@@ -510,17 +542,34 @@ export function App() {
   if (loadState.state === "error") return <ErrorState message={loadState.message} />;
 
   const selectedPatient = loadState.report.patients.find((patient) => patient.id === selectedId) ?? loadState.report.patients[0] ?? null;
+  const confirmManualReviews = (findingIds: string[]) => {
+    setConfirmedFindingIds((current) => Array.from(new Set([...current, ...findingIds])));
+  };
+
   return (
-    <Clinic
-      report={loadState.report}
-      liveState={liveState}
-      repairStates={repairStates}
-      batchRepairState={batchRepairState}
-      selectedPatient={selectedPatient}
-      onSelectPatient={setSelectedId}
-      onStartRepair={startRepair}
-      onStartAllRepairs={startAllRepairs}
-    />
+    <>
+      <Clinic
+        report={loadState.report}
+        liveState={liveState}
+        repairStates={repairStates}
+        batchRepairState={batchRepairState}
+        manualReviewQueue={manualReviewQueue}
+        selectedPatient={selectedPatient}
+        onSelectPatient={setSelectedId}
+        onStartRepair={startRepair}
+        onStartAllRepairs={startAllRepairs}
+        onOpenManualReview={() => setManualDialogOpen(true)}
+      />
+      <ManualReviewDialog
+        open={manualDialogOpen}
+        items={manualReviewQueue}
+        onClose={() => setManualDialogOpen(false)}
+        onConfirm={(findingIds) => {
+          confirmManualReviews(findingIds);
+          setManualDialogOpen(false);
+        }}
+      />
+    </>
   );
 }
 
@@ -529,19 +578,23 @@ function Clinic({
   liveState,
   repairStates,
   batchRepairState,
+  manualReviewQueue,
   selectedPatient,
   onSelectPatient,
   onStartRepair,
-  onStartAllRepairs
+  onStartAllRepairs,
+  onOpenManualReview
 }: {
   report: SkillDoctorReport;
   liveState: LiveState;
   repairStates: Record<string, RepairState>;
   batchRepairState: BatchRepairState;
+  manualReviewQueue: ManualReviewItem[];
   selectedPatient: Patient | null;
   onSelectPatient: (id: string) => void;
   onStartRepair: (patient: Patient) => Promise<void>;
   onStartAllRepairs: () => Promise<void>;
+  onOpenManualReview: () => void;
 }) {
   const wards = useMemo(() => groupPatientsByWard(report), [report]);
   const projectedScore = useMemo(() => averageProjectedScore(report.patients), [report.patients]);
@@ -557,6 +610,8 @@ function Clinic({
   const runningRepairCount = batchRepairState.status === "running" || batchRepairState.status === "rescanning"
     ? batchRepairState.total
     : rankedPatients.filter((patient) => repairStates[patient.id]?.status === "running" || repairStates[patient.id]?.status === "rescanning").length;
+  const pendingManualReviewCount = manualReviewQueue.filter((item) => item.status === "pending").length;
+  const confirmedManualReviewCount = manualReviewQueue.filter((item) => item.status === "confirmed").length;
 
   return (
     <main className="clinic-shell">
@@ -580,6 +635,11 @@ function Clinic({
             onClick={() => {
               void onStartAllRepairs();
             }}
+          />
+          <ManualReviewButton
+            pendingCount={pendingManualReviewCount}
+            confirmedCount={confirmedManualReviewCount}
+            onClick={onOpenManualReview}
           />
           <GatePill gate={report.summary.gate} />
           <div className={`score-chip tone-${tone}`} aria-label={`整体健康分 ${report.summary.score} 分，满分 100 分`}>
@@ -645,7 +705,13 @@ function Clinic({
             <PatientTable patients={rankedPatients} repairStates={repairStates} selectedPatient={selectedPatient} onSelectPatient={onSelectPatient} />
           </section>
 
-          <PatientPanel patient={selectedPatient} repairState={selectedRepairState} onStartRepair={onStartRepair} />
+          <PatientPanel
+            patient={selectedPatient}
+            repairState={selectedRepairState}
+            manualReviewQueue={manualReviewQueue}
+            onStartRepair={onStartRepair}
+            onOpenManualReview={onOpenManualReview}
+          />
         </section>
       )}
     </main>
@@ -1095,11 +1161,15 @@ function PatientTable({
 function PatientPanel({
   patient,
   repairState,
-  onStartRepair
+  manualReviewQueue,
+  onStartRepair,
+  onOpenManualReview
 }: {
   patient: Patient | null;
   repairState: RepairState | undefined;
+  manualReviewQueue: ManualReviewItem[];
   onStartRepair: (patient: Patient) => Promise<void>;
+  onOpenManualReview: () => void;
 }) {
   if (!patient) {
     return (
@@ -1114,6 +1184,9 @@ function PatientPanel({
 
   const completedFindingIds = new Set(repairState?.completedFindingIds ?? []);
   const skippedFindingIds = new Set(repairState?.skippedFindingIds ?? []);
+  const confirmedFindingIds = new Set(manualReviewQueue.filter((item) => item.status === "confirmed").map((item) => item.finding.id));
+  const patientManualPendingCount = manualReviewQueue.filter((item) => item.patient.id === patient.id && item.status === "pending").length;
+  const patientManualConfirmedCount = manualReviewQueue.filter((item) => item.patient.id === patient.id && item.status === "confirmed").length;
 
   return (
     <aside className="patient-panel panel-card" aria-label={`${patient.name} 诊疗详情`}>
@@ -1133,7 +1206,14 @@ function PatientPanel({
         <span className={`status-pill gate-${patient.gate}`}>{displayGate(patient.gate)}</span>
       </div>
 
-      <RepairControls patient={patient} state={repairState} onStartRepair={onStartRepair} />
+      <RepairControls
+        patient={patient}
+        state={repairState}
+        manualPendingCount={patientManualPendingCount}
+        manualConfirmedCount={patientManualConfirmedCount}
+        onStartRepair={onStartRepair}
+        onOpenManualReview={onOpenManualReview}
+      />
 
       <div className="treatment-list">
         <h3>治疗队列</h3>
@@ -1142,11 +1222,12 @@ function PatientPanel({
         ) : (
           patient.issues.map((issue) => {
             const isSkipped = skippedFindingIds.has(issue.id);
+            const isConfirmed = confirmedFindingIds.has(issue.id);
             return (
-            <article className={`finding severity-${issue.severity} ${completedFindingIds.has(issue.id) ? "is-resolved" : ""} ${isSkipped ? "is-skipped" : ""}`} key={issue.id}>
+            <article className={`finding severity-${issue.severity} ${completedFindingIds.has(issue.id) ? "is-resolved" : ""} ${isSkipped ? "is-skipped" : ""} ${isConfirmed ? "is-confirmed" : ""}`} key={issue.id}>
               <div className="finding-head">
                 <strong>{issue.rule_id}</strong>
-                <span>{isSkipped ? "需确认" : displaySeverity(issue.severity)}</span>
+                <span>{isConfirmed ? "已确认" : isSkipped ? "需确认" : displaySeverity(issue.severity)}</span>
               </div>
               <p>{issue.message}</p>
               <small>{issue.file}{issue.span ? `:${issue.span.line}` : ""} / {issue.evidence}</small>
@@ -1163,11 +1244,17 @@ function PatientPanel({
 function RepairControls({
   patient,
   state,
-  onStartRepair
+  manualPendingCount,
+  manualConfirmedCount,
+  onStartRepair,
+  onOpenManualReview
 }: {
   patient: Patient;
   state: RepairState | undefined;
+  manualPendingCount: number;
+  manualConfirmedCount: number;
   onStartRepair: (patient: Patient) => Promise<void>;
+  onOpenManualReview: () => void;
 }) {
   const repairState = state ?? {
     status: "idle" as const,
@@ -1210,17 +1297,29 @@ function RepairControls({
       <p className="repair-message">{repairState.message}</p>
       {isComplete ? <p className="repair-done">真实复诊通过。该对象已进入可发布状态，并会在清单中自然后移。</p> : null}
       {isReview ? <p className="repair-review-note">复诊后仍有发现项，未被自动消除的问题已进入人工确认队列。</p> : null}
-      <button
-        className="repair-button"
-        type="button"
-        disabled={!hasIssues || isRunning}
-        onClick={() => {
-          void onStartRepair(patient);
-        }}
-      >
-        {isRunning ? <RefreshCw aria-hidden="true" size={16} /> : isComplete ? <CheckCircle2 aria-hidden="true" size={16} /> : <Sparkles aria-hidden="true" size={16} />}
-        <span>{hasIssues ? actionLabel : "无需治疗"}</span>
-      </button>
+      {manualConfirmedCount > 0 ? <p className="repair-done">{manualConfirmedCount} 个发现项已人工确认，等待按建议修复或交给 LLM 生成补丁草案。</p> : null}
+      <div className="repair-actions">
+        <button
+          className="repair-button"
+          type="button"
+          disabled={!hasIssues || isRunning}
+          onClick={() => {
+            void onStartRepair(patient);
+          }}
+        >
+          {isRunning ? <RefreshCw aria-hidden="true" size={16} /> : isComplete ? <CheckCircle2 aria-hidden="true" size={16} /> : <Sparkles aria-hidden="true" size={16} />}
+          <span>{hasIssues ? actionLabel : "无需治疗"}</span>
+        </button>
+        <button
+          className="manual-review-inline-button"
+          type="button"
+          disabled={manualPendingCount === 0}
+          onClick={onOpenManualReview}
+        >
+          <FileText aria-hidden="true" size={16} />
+          <span>{manualPendingCount > 0 ? `人工确认 ${manualPendingCount} 项` : "暂无待确认"}</span>
+        </button>
+      </div>
     </section>
   );
 }
@@ -1282,6 +1381,142 @@ function TreatAllButton({
       {runningCount === 0 && autoFixableCount > 0 ? <strong>{autoFixableCount} 可自动</strong> : null}
       {runningCount === 0 && manualRequiredCount > 0 ? <strong className="manual-count">{manualRequiredCount} 需确认</strong> : null}
     </button>
+  );
+}
+
+function ManualReviewButton({
+  pendingCount,
+  confirmedCount,
+  onClick
+}: {
+  pendingCount: number;
+  confirmedCount: number;
+  onClick: () => void;
+}) {
+  const disabled = pendingCount === 0 && confirmedCount === 0;
+  const label = pendingCount > 0 ? `人工确认 ${pendingCount}` : confirmedCount > 0 ? `已确认 ${confirmedCount}` : "人工确认";
+
+  return (
+    <button className="manual-review-button" type="button" disabled={disabled} onClick={onClick}>
+      <FileText aria-hidden="true" size={16} />
+      <span>{label}</span>
+      {pendingCount > 0 ? <strong>{pendingCount}</strong> : null}
+    </button>
+  );
+}
+
+function ManualReviewDialog({
+  open,
+  items,
+  onClose,
+  onConfirm
+}: {
+  open: boolean;
+  items: ManualReviewItem[];
+  onClose: () => void;
+  onConfirm: (findingIds: string[]) => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "downloaded" | "error">("idle");
+
+  useEffect(() => {
+    if (!open) return;
+    setCopyState("idle");
+    closeRef.current?.focus();
+  }, [open, items.length]);
+
+  if (!open) return null;
+
+  const pendingItems = items.filter((item) => item.status === "pending");
+  const confirmedItems = items.filter((item) => item.status === "confirmed");
+  const llmItems = items.filter((item) => item.llmRecommended);
+  const previewItems = [...pendingItems, ...confirmedItems].slice(0, 8);
+  const hiddenCount = Math.max(0, items.length - previewItems.length);
+  const pendingIds = pendingItems.map((item) => item.finding.id);
+  const llmPrompt = buildLlmRepairPrompt(items);
+
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(llmPrompt);
+        setCopyState("copied");
+        return;
+      }
+      downloadText("skill-doctor-llm-repair-prompt.md", llmPrompt);
+      setCopyState("downloaded");
+    } catch {
+      downloadText("skill-doctor-llm-repair-prompt.md", llmPrompt);
+      setCopyState("downloaded");
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="manual-review-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-review-title">
+        <header className="manual-dialog-head">
+          <div>
+            <p>人工确认队列</p>
+            <h2 id="manual-review-title">批量确认待人工处理项</h2>
+          </div>
+          <button className="dialog-close-button" type="button" onClick={onClose} ref={closeRef} aria-label="关闭人工确认弹窗">×</button>
+        </header>
+
+        <div className="manual-dialog-summary" aria-label="人工确认摘要">
+          <span><strong>{pendingItems.length}</strong> 待确认</span>
+          <span><strong>{confirmedItems.length}</strong> 已确认</span>
+          <span><strong>{llmItems.length}</strong> 建议 LLM 辅助</span>
+        </div>
+
+        <p className="manual-dialog-copy">
+          一键治疗不会自动改写需要判断的文件。请在这里一次确认所有待处理项；确认后它们会保留在报告中，直到你按建议修复并通过真实复诊。
+        </p>
+
+        <div className="llm-assist-box">
+          <div>
+            <h3>是否需要 LLM 辅助？</h3>
+            <p>建议引入，但放在人工确认之后：让 LLM 生成补丁草案、解释阻断原因和列出待补文件；真正写入仍由用户确认，最终状态仍以复诊报告为准。</p>
+          </div>
+          <button className="copy-prompt-button" type="button" onClick={() => { void copyPrompt(); }}>
+            <FileText aria-hidden="true" size={16} />
+            <span>{copyState === "copied" ? "已复制" : copyState === "downloaded" ? "已下载上下文" : "复制 LLM 修复上下文"}</span>
+          </button>
+        </div>
+
+        {items.length === 0 ? (
+          <p className="manual-empty">当前没有需要人工确认的发现项。</p>
+        ) : (
+          <div className="manual-review-list">
+            {previewItems.map((item) => {
+              const location = item.finding.span ? `${item.finding.file}:${item.finding.span.line}` : item.finding.file;
+              return (
+                <article className={`manual-review-item status-${item.status}`} key={item.finding.id}>
+                  <div>
+                    <strong>{item.finding.rule_id}</strong>
+                    <span>{item.status === "confirmed" ? "已确认" : "待确认"}</span>
+                  </div>
+                  <p>{item.finding.message}</p>
+                  <small>{item.patient.name} / {location} / {item.finding.evidence}</small>
+                </article>
+              );
+            })}
+            {hiddenCount > 0 ? <p className="manual-hidden-count">还有 {hiddenCount} 个发现项，确认时会一并纳入。</p> : null}
+          </div>
+        )}
+
+        <footer className="manual-dialog-actions">
+          <button className="secondary-button" type="button" onClick={onClose}>稍后处理</button>
+          <button
+            className="confirm-review-button"
+            type="button"
+            disabled={pendingIds.length === 0}
+            onClick={() => onConfirm(pendingIds)}
+          >
+            <CheckCircle2 aria-hidden="true" size={16} />
+            <span>{pendingIds.length > 0 ? `确认全部 ${pendingIds.length} 项` : "已全部确认"}</span>
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

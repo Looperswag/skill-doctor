@@ -161,6 +161,7 @@ a {
 .status-pill,
 .live-pill,
 .treat-all-button,
+.manual-review-button,
 .runner-pill,
 .score-chip,
 .export-button {
@@ -173,6 +174,7 @@ a {
 .gate-pill,
 .live-pill,
 .treat-all-button,
+.manual-review-button,
 .status-pill {
   gap: 6px;
   border: 1px solid transparent;
@@ -267,6 +269,45 @@ a {
 
 .treat-all-button.is-running svg {
   animation: live-spin 1100ms linear infinite;
+}
+
+.manual-review-button {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-color: rgba(216, 146, 31, 0.3);
+  background: var(--amber-soft);
+  color: #8a5a08;
+  cursor: pointer;
+  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.manual-review-button strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(216, 146, 31, 0.16);
+  font-size: 12px;
+}
+
+.manual-review-button:hover,
+.manual-review-button:focus-visible {
+  background: #ffedc2;
+  box-shadow: 0 12px 26px rgba(216, 146, 31, 0.16);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.manual-review-button:disabled {
+  border-color: var(--line);
+  background: #e8eef5;
+  color: var(--muted);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 .status-pill {
@@ -1237,6 +1278,42 @@ button.patient-row {
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
+.repair-actions,
+.manual-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.manual-review-inline-button,
+.secondary-button,
+.confirm-review-button,
+.copy-prompt-button,
+.dialog-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  font-weight: 900;
+}
+
+.manual-review-inline-button {
+  gap: 7px;
+  flex: 1 1 150px;
+  min-height: 38px;
+  border: 1px solid rgba(216, 146, 31, 0.3);
+  background: var(--amber-soft);
+  color: #8a5a08;
+  cursor: pointer;
+}
+
+.manual-review-inline-button:disabled {
+  border-color: var(--line);
+  background: #eef3f8;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .repair-button:hover,
 .repair-button:focus-visible {
   background: var(--blue-deep);
@@ -1301,6 +1378,13 @@ button.patient-row {
   background: linear-gradient(180deg, #ffffff, #fff9ed);
 }
 
+.finding.is-confirmed {
+  --severity-color: var(--green);
+  border-color: rgba(34, 160, 107, 0.24);
+  border-left-color: var(--green);
+  background: linear-gradient(180deg, #ffffff, #f1fbf6);
+}
+
 .finding-head {
   display: flex;
   justify-content: space-between;
@@ -1360,6 +1444,219 @@ button.patient-row {
     box-shadow: 0 0 0 0 rgba(34, 160, 107, 0);
     transform: translateX(0);
   }
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(18, 23, 34, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.manual-review-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius-panel) + 4px);
+  background: var(--surface);
+  box-shadow: 0 28px 90px rgba(18, 23, 34, 0.22);
+}
+
+.manual-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.manual-dialog-head p {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.manual-dialog-head h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.dialog-close-button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.dialog-close-button:hover,
+.dialog-close-button:focus-visible {
+  border-color: rgba(19, 168, 229, 0.3);
+  color: var(--ink);
+  outline: none;
+}
+
+.manual-dialog-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.manual-dialog-summary span {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: #fbfdff;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.manual-dialog-summary strong {
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.manual-dialog-copy,
+.manual-empty,
+.manual-hidden-count {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.llm-assist-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(19, 168, 229, 0.2);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, #ffffff, #f0faff);
+}
+
+.llm-assist-box h3,
+.llm-assist-box p {
+  margin: 0;
+}
+
+.llm-assist-box h3 {
+  font-size: 16px;
+}
+
+.llm-assist-box p {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.copy-prompt-button {
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid rgba(19, 168, 229, 0.28);
+  background: var(--surface);
+  color: var(--blue-deep);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.manual-review-list {
+  display: grid;
+  gap: 10px;
+}
+
+.manual-review-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(216, 146, 31, 0.24);
+  border-left: 4px solid var(--amber);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, #ffffff, #fff9ed);
+}
+
+.manual-review-item.status-confirmed {
+  border-color: rgba(34, 160, 107, 0.22);
+  border-left-color: var(--green);
+  background: linear-gradient(180deg, #ffffff, #f1fbf6);
+}
+
+.manual-review-item div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.manual-review-item strong {
+  overflow-wrap: anywhere;
+}
+
+.manual-review-item span {
+  color: #8a5a08;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.manual-review-item.status-confirmed span {
+  color: #176947;
+}
+
+.manual-review-item p,
+.manual-review-item small {
+  margin: 0;
+}
+
+.manual-review-item small {
+  color: var(--muted);
+}
+
+.manual-dialog-actions {
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.secondary-button,
+.confirm-review-button {
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.secondary-button {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.confirm-review-button {
+  gap: 7px;
+  border-color: rgba(19, 168, 229, 0.35);
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.confirm-review-button:disabled {
+  border-color: var(--line);
+  background: #e8eef5;
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 ::view-transition-group(*) {
@@ -1445,6 +1742,11 @@ button.patient-row {
   }
 
   .insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-assist-box,
+  .manual-dialog-summary {
     grid-template-columns: 1fr;
   }
 }
