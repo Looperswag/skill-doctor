@@ -20,4 +20,4 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: node packages/cli/dist/index.js scan --fixture demo --format markdown
-      - run: npm pack -w skill-doctor --dry-run
+      - run: npm pack -w @looperswag/skill-doctor --dry-run
