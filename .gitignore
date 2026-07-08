@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.clinic-cache/
+reports/
+.env
+.env.*
+!.env.example
+.DS_Store
+.worktrees/
+*.log
